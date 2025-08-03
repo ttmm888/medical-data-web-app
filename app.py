@@ -123,9 +123,22 @@ def generate_unique_filename(filename):
     return f"{unique_id}.{ext}"
 
 def create_tables():
-    with app.app_context():
-        db.create_all()
-        print("Database tables created successfully!")
+    try:
+        with app.app_context():
+            # Drop all tables and recreate them (for fresh start)
+            db.drop_all()
+            db.create_all()
+            print("Database tables created successfully!")
+            
+            # Verify tables were created
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            tables = inspector.get_table_names()
+            print(f"Created tables: {tables}")
+            
+    except Exception as e:
+        print(f"Database creation error: {e}")
+        raise e
 
 def calculate_age_from_date(dob):
     today=date.today()
@@ -149,15 +162,44 @@ def split_lines(text):
 
 @app.route('/')
 def home():
-    total_members = Member.query.count()
-    recent_members = Member.query.order_by(Member.created_at.desc()).limit(6).all()
-    recent_additions = Member.query.filter(
-    Member.created_at >= datetime.now() - timedelta(days=30)).count()
+    try:
+        # Try to create tables if they don't exist
+        with app.app_context():
+            db.create_all()
+        
+        total_members = Member.query.count()
+        recent_members = Member.query.order_by(Member.created_at.desc()).limit(6).all()
+        recent_additions = Member.query.filter(
+            Member.created_at >= datetime.now() - timedelta(days=30)).count()
+        
+        return render_template("index.html", 
+                             total_members=total_members,
+                             recent_members=recent_members,
+                             recent_additions=recent_additions)
+    except Exception as e:
+        # If there's still an error, show a simple message
+        return f"""
+        <h1>Medical App</h1>
+        <p>Setting up database... Please refresh in a moment.</p>
+        <p>Error details: {str(e)}</p>
+        <a href="/">Refresh</a>
+        """
     
-    return render_template("index.html", 
-                         total_members=total_members,
-                         recent_members=recent_members,
-                         recent_additions=recent_additions)
+@app.route('/init-db')
+def init_db():
+    try:
+        with app.app_context():
+            db.drop_all()
+            db.create_all()
+            
+            # Verify it worked
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            tables = inspector.get_table_names()
+            
+            return f"Database initialized successfully! Tables created: {tables}"
+    except Exception as e:
+        return f"Database initialization failed: {str(e)}"
 
 @app.route('/add-member',methods=['GET'])
 def add_member():
@@ -496,6 +538,13 @@ def delete_file(file_id):
     return redirect(url_for('view_member',member_id=member_id))
 
 if __name__ == '__main__':
+    create_tables()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+else:
+    # This runs when deployed (not when running locally)
+    with app.app_context():
+        db.create_all()
     create_tables()
     # Get port from environment variable (Railway needs this)
     port = int(os.environ.get('PORT', 5000))
