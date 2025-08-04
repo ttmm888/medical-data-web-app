@@ -10,10 +10,10 @@ import random
 
 app = Flask(__name__)
 
-# Database Configuration - Updated for Railway
+# In your app.py
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///medical.db')
 
-# Handle Railway's PostgreSQL URL format if provided
+# Railway can provide PostgreSQL for free
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -629,6 +629,46 @@ def delete_file(file_id):
         flash(f"Error deleting file:{str(e)}","error")
     
     return redirect(url_for('view_member',member_id=member_id))
+
+@app.route('/backup-data')
+def backup_data():
+    try:
+        members = Member.query.all()
+        backup_data = []
+        
+        for member in members:
+            member_data = {
+                'name': member.name,
+                'member_id': member.member_id,
+                'date_of_birth': member.date_of_birth.strftime('%Y-%m-%d'),
+                'gender': member.gender,
+                'underlying': member.underlying,
+                'drug_allergy': member.drug_allergy,
+                'doctors': [d.name for d in member.doctors],
+                'medications': [m.name for m in member.medications],
+                'diagnoses': [d.name for d in member.diagnoses]
+            }
+            backup_data.append(member_data)
+        
+        return jsonify(backup_data)
+    
+    except Exception as e:
+        return f"Backup failed: {str(e)}"
+    
+@app.route('/export-members')
+def export_members():
+    try:
+        members = Member.query.all()
+        
+        # Create CSV-like format
+        export_text = "Name,Member ID,Date of Birth,Gender,Underlying,Drug Allergy\n"
+        for member in members:
+            export_text += f"{member.name},{member.member_id},{member.date_of_birth},{member.gender},{member.underlying},{member.drug_allergy}\n"
+        
+        return f"<pre>{export_text}</pre><p>Copy and save this data as backup</p>"
+        
+    except Exception as e:
+        return f"Export failed: {str(e)}"
 
 if __name__ == '__main__':
     print("Starting Medical App...")
