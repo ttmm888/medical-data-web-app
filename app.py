@@ -130,6 +130,14 @@ def generate_unique_filename(filename):
     unique_id=str(uuid.uuid4())
     return f"{unique_id}.{ext}"
 
+def split_lines(text):
+    if isinstance(text,list):
+        return text
+    if not text:
+        return []
+    
+    return [item.strip() for item in text.replace("\n",",").split(",") if item.strip()]
+
 def create_tables():
     """Create database tables with proper error handling"""
     try:
@@ -179,14 +187,6 @@ def generate_id(length=6):
         if not Member.query.filter_by(member_id=new_id).first():
             return new_id
         
-def split_lines(text):
-    if isinstance(text,list):
-        return text
-    if not text:
-        return []
-    
-    return [item.strip() for item in text.replace("\n",",").split(",") if item.strip()]
-
 @app.route('/init-db')
 def init_db():
     """Manual database initialization endpoint"""
@@ -304,12 +304,11 @@ def add_member_post():
         name=request.form.get('name')
         date_of_birth=request.form.get('date_of_birth')
         gender=request.form.get('gender')
-        underlying=request.form.get('underlying')
-        underlying=split_lines(underlying)
-        drug_allergy=request.form.get('drug_allergy')
+        underlying=request.form.get('underlying', '').strip()  # Keep as string
+        drug_allergy=request.form.get('drug_allergy', '').strip()  # Keep as string
         
         if not name or not date_of_birth or not gender:
-            flash("Name,date of birth and gender are required!,Error")
+            flash("Name,date of birth and gender are required!","error")
             return redirect(url_for('add_member'))
         
         dob=datetime.strptime(date_of_birth,"%Y-%m-%d").date()
@@ -322,8 +321,8 @@ def add_member_post():
 
         new_member = Member(
             member_id=generate_id(),
-            name= name.strip().lower(),
-            date_of_birth= dob,
+            name=name.strip().lower(),
+            date_of_birth=dob,
             age=calculate_age_from_date(dob),
             gender=gender, 
             drug_allergy=drug_allergy,
@@ -333,6 +332,7 @@ def add_member_post():
         db.session.add(new_member)
         db.session.flush()
 
+        # Use split_lines for these fields (they should be lists)
         for doctor_name in split_lines(request.form.get('doctor','')):
             if doctor_name:
                 doctor=Doctor(name=doctor_name,member_id=new_member.id)
@@ -345,19 +345,18 @@ def add_member_post():
 
         for diag_name in split_lines(request.form.get('diagnosis',"")):
             if diag_name:
-                diagnosis=Diagnosis(name=diag_name,member_id=new_member.member_id)
+                diagnosis=Diagnosis(name=diag_name,member_id=new_member.id)
                 db.session.add(diagnosis)
 
         db.session.commit()
-        flash("Member added succssfully!","success")
+        flash("Member added successfully!","success")
         return redirect(url_for('view_member', member_id=new_member.member_id))
     
     except Exception as e:
         db.session.rollback()
-        flash(f"An error occured:{str(e)}","error")
-        return redirect(url_for('home')) 
+        flash(f"An error occurred:{str(e)}","error")
+        return redirect(url_for('home'))
     
-
 @app.route('/view-member/<member_id>')
 def view_member(member_id):
     member=Member.query.filter_by(member_id=member_id).first()
