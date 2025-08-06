@@ -1,0 +1,370 @@
+<!-- templates/upload-file.html -->
+{% extends "base.html" %}
+
+{% block title %}Upload File - {{ member.name|title }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <!-- Header -->
+        <div class="mb-4">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item">
+                        <a href="{{ url_for('home') }}">Home</a>
+                    </li>
+                    <li class="breadcrumb-item">
+                        <a href="{{ url_for('view_member', member_id=member.member_id) }}">
+                            {{ member.name|title }}
+                        </a>
+                    </li>
+                    <li class="breadcrumb-item active">Upload File</li>
+                </ol>
+            </nav>
+            
+            <h2>
+                <i class="bi bi-upload me-2"></i>
+                Upload Medical File
+            </h2>
+            <p class="text-muted">
+                Upload medical documents, test results, or images for 
+                <strong class="text-capitalize">{{ member.name }}</strong>
+            </p>
+        </div>
+
+        <!-- Upload Form -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-file-earmark-plus me-2"></i>
+                    File Upload
+                </h5>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                    <!-- File Upload Area -->
+                    <div class="mb-4">
+                        <label for="file" class="form-label required">
+                            <i class="bi bi-paperclip me-1"></i>
+                            Select File
+                        </label>
+                        <div class="file-upload-area">
+                            <input type="file" 
+                                   class="form-control" 
+                                   id="file" 
+                                   name="file" 
+                                   required 
+                                   accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx">
+                            <div id="file-info" class="text-center mt-3">
+                                <i class="bi bi-cloud-upload display-4 text-muted"></i>
+                                <p class="mt-2 mb-1"><strong>Choose a file</strong> or drag and drop it here</p>
+                                <small class="text-muted">
+                                    Supported formats: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX (Max: 16MB)
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                        
+                    <!-- File Description -->
+                    <div class="mb-4">
+                        <label for="description" class="form-label">
+                            <i class="bi bi-card-text me-1"></i>
+                            Description
+                        </label>
+                        <textarea id="description" 
+                                  name="description" 
+                                  class="form-control" 
+                                  rows="3" 
+                                  placeholder="Enter a brief description of this file (e.g., 'Blood test results from 2025-01-15', 'X-ray chest scan', 'Prescription from Dr. Smith')"></textarea>
+                        <div class="form-text">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Adding a description helps identify the file later
+                        </div>
+                    </div>
+
+                    <!-- File Upload Guidelines -->
+                    <div class="alert alert-info">
+                        <h6 class="alert-heading">
+                            <i class="bi bi-info-circle me-2"></i>
+                            Upload Guidelines
+                        </h6>
+                        <ul class="mb-0">
+                            <li>Ensure all patient information is clearly visible and legible</li>
+                            <li>For multi-page documents, consider combining them into a single PDF</li>
+                            <li>Include relevant dates and doctor information in the description</li>
+                            <li>Files are securely stored and only accessible to authorized personnel</li>
+                        </ul>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="d-flex justify-content-between">
+                        <a href="{{ url_for('view_member', member_id=member.member_id) }}" 
+                           class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left me-2"></i>
+                            Back to Member
+                        </a>
+                        
+                        <button type="submit" class="btn btn-primary px-4">
+                            <span class="btn-text">
+                                <i class="bi bi-upload me-2"></i>
+                                Upload File
+                            </span>
+                            <span class="loading-spinner d-none">
+                                <span class="spinner-border spinner-border-sm me-2" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </span>
+                                Uploading...
+                            </span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Existing Files -->
+        {% if member.medical_files %}
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-files me-2"></i>
+                    Existing Files ({{ member.medical_files|length }})
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    {% for file in member.medical_files %}
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body p-3">
+                                <div class="d-flex align-items-start">
+                                    <div class="me-3">
+                                        {% if file.file_type and 'image' in file.file_type %}
+                                            <i class="bi bi-image text-success"></i>
+                                        {% elif file.filename.endswith('.pdf') %}
+                                            <i class="bi bi-file-pdf text-danger"></i>
+                                        {% elif file.filename.endswith(('.doc', '.docx')) %}
+                                            <i class="bi bi-file-word text-primary"></i>
+                                        {% else %}
+                                            <i class="bi bi-file-earmark text-muted"></i>
+                                        {% endif %}
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <h6 class="mb-1">{{ file.filename }}</h6>
+                                        {% if file.description %}
+                                            <p class="text-muted small mb-1">{{ file.description }}</p>
+                                        {% endif %}
+                                        <small class="text-muted">
+                                            {{ "%.2f"|format(file.file_size / 1024 / 1024) }} MB • 
+                                            {{ file.uploaded_at.strftime('%m/%d/%Y') }}
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <a href="{{ url_for('download_file', file_id=file.id) }}" 
+                                       class="btn btn-sm btn-outline-primary me-1">
+                                        <i class="bi bi-download"></i>
+                                    </a>
+                                    <form method="POST" 
+                                          action="{{ url_for('delete_file', file_id=file.id) }}" 
+                                          class="d-inline">
+                                        <button type="submit" 
+                                                class="btn btn-sm btn-outline-danger"
+                                                onclick="return confirm('Are you sure you want to delete this file?')">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% block extra_css %}
+<style>
+.file-upload-area {
+    border: 2px dashed #dee2e6;
+    border-radius: 0.375rem;
+    padding: 2rem;
+    text-align: center;
+    transition: all 0.3s ease;
+    background-color: #f8f9fa;
+    position: relative;
+    cursor: pointer;
+}
+
+.file-upload-area:hover {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+}
+
+.file-upload-area.dragover {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+    transform: scale(1.02);
+}
+
+.file-upload-area input[type="file"] {
+    /* Make file input invisible but still functional */
+    opacity: 0;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    z-index: -1;
+}
+
+.file-upload-area.file-selected {
+    border-color: #198754;
+    background-color: #d1e7dd;
+}
+
+.btn.loading .btn-text {
+    display: none;
+}
+
+.btn.loading .loading-spinner {
+    display: inline !important;
+}
+
+.required::after {
+    content: " *";
+    color: #dc3545;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Enhanced file upload handling
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('file');
+        const uploadArea = document.querySelector('.file-upload-area');
+        const fileInfo = document.getElementById('file-info');
+        
+        // File upload form submission
+        form.addEventListener('submit', function(e) {
+            const file = fileInput.files[0];
+            if (!file) {
+                e.preventDefault();
+                if (typeof MedicalApp !== 'undefined') {
+                    MedicalApp.showAlert('Please select a file to upload.', 'warning');
+                } else {
+                    alert('Please select a file to upload.');
+                }
+                return;
+            }
+            
+            // Check file size (16MB limit)
+            if (file.size > 16 * 1024 * 1024) {
+                e.preventDefault();
+                if (typeof MedicalApp !== 'undefined') {
+                    MedicalApp.showAlert('File size exceeds 16MB limit. Please choose a smaller file.', 'error');
+                } else {
+                    alert('File size exceeds 16MB limit. Please choose a smaller file.');
+                }
+                return;
+            }
+            
+            // Show loading state
+            const btn = form.querySelector('button[type="submit"]');
+            btn.classList.add('loading');
+            btn.disabled = true;
+        });
+        
+        // File selection feedback
+        fileInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                updateFileDisplay(file);
+            } else {
+                resetFileDisplay();
+            }
+        });
+        
+        // Drag and drop functionality
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                // Check if file type is allowed
+                const allowedTypes = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.doc', '.docx'];
+                const fileName = files[0].name.toLowerCase();
+                const isAllowed = allowedTypes.some(type => fileName.endsWith(type));
+                
+                if (isAllowed) {
+                    fileInput.files = files;
+                    updateFileDisplay(files[0]);
+                } else {
+                    if (typeof MedicalApp !== 'undefined') {
+                        MedicalApp.showAlert('Invalid file type. Please select a supported file format.', 'error');
+                    } else {
+                        alert('Invalid file type. Please select a supported file format.');
+                    }
+                }
+            }
+        });
+        
+        // Update file display without breaking the input
+        function updateFileDisplay(file) {
+            const sizeInMB = (file.size / 1024 / 1024).toFixed(2);
+            
+            // Update the display info only, don't replace the input
+            fileInfo.innerHTML = `
+                <i class="bi bi-file-check display-4 text-success"></i>
+                <p class="mt-2 mb-1"><strong>${file.name}</strong></p>
+                <small class="text-muted">${sizeInMB} MB • Click to change file</small>
+            `;
+            
+            uploadArea.classList.add('file-selected');
+        }
+        
+        // Reset file display
+        function resetFileDisplay() {
+            fileInfo.innerHTML = `
+                <i class="bi bi-cloud-upload display-4 text-muted"></i>
+                <p class="mt-2 mb-1"><strong>Choose a file</strong> or drag and drop it here</p>
+                <small class="text-muted">
+                    Supported formats: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX (Max: 16MB)
+                </small>
+            `;
+            
+            uploadArea.classList.remove('file-selected');
+        }
+        
+        // Click anywhere in upload area to trigger file selection
+        uploadArea.addEventListener('click', function(e) {
+            // Only trigger file selection when clicking in the upload area itself
+            if (e.target === this || e.target === fileInfo || fileInfo.contains(e.target)) {
+                e.preventDefault();
+                fileInput.click();
+            }
+        });
+        
+        // Prevent form submission when clicking the upload area
+        uploadArea.addEventListener('submit', function(e) {
+            e.preventDefault();
+        });
+    });
+</script>
+{% endblock %}
+{% endblock %}

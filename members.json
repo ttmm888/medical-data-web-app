@@ -1,0 +1,40 @@
+[
+    {
+        "member_id": "CX2KY4",
+        "name": "wong soon wah",
+        "date_of_birth": "1958-09-19",
+        "age": 66,
+        "gender": "Male",
+        "doctors": [
+            "Dr Kow Ken Siong, Respiratory Medicine, Sunway Medical Centre, \r\nDr Tan Guan Hee,Urologist, Sunway Medical Centre, \r\nDr Sia Kian Joo, ENT Ear Nose Throat Surgeon, Subang Jaya Medical Centre, \r\nDr Raymond Tan Yen Leong, Neurology, Sunway Medical Centre (Seen him for numb face in Jan 2025 after china trip), \r\nDr Toh Charng Jeng, Pain Management Neurosurgery, Sunway Medical Centre, \r\nDr Rudy Yeoh Seok Ching Haematology Blood Studies, Sunway Medical Centre, "
+        ],
+        "medication": [
+            "Foster NEXTHaler 100/6mg 120s, \r\nCialis 5mg, "
+        ],
+        "diagnosis": [
+            "['2025-24-07 16:33', 'Lumbar Spine Surgery done on 20/5/2025, admitted 19/5/2025, discharged 04/06/2025. Full Surgery Name \"100% primary lumbar transforaminal + 15% Lumbar Interbody Fusion(TLIF)/Posterior Lumbar Interbody Fusion(PLIF)\"'],"
+        ],
+        "reports": [],
+        "created_at": "2025-07-24T16:17:01.541621",
+        "updated_at": "2025-07-25T15:42:30.469685"
+    },
+    {
+        "member_id": "9OFFEJ",
+        "name": "low mee eng",
+        "date_of_birth": "1949-10-01",
+        "age": 75,
+        "gender": "Female",
+        "doctors": [
+            "Dr Lim Soo Jin, Nephrologist(Kidney),Sunway Medical Velocity, \r\nDr Lee Yin Yin, Dermatologist Skin, Sunway Medical Centre, "
+        ],
+        "medication": [
+            "Cinacalcet 25mg OD,\r\n CACO3 1500mg TDS,\r\n Amlodipine 10mg OD, \r\nFolic acid 5mg OD,\r\n Vit Bco 1 tab OD, \r\nEprex 2k 2x a week, \r\nCetirizine 10mg(Zyrtec), "
+        ],
+        "diagnosis": [
+            "24/7/25 Dr Lee Yin Yin prescribed Ceradan Advanced Moisturizing Cream, Beta Valerate 0.1% ointment(BENOSONE steroid) and Zyrtec. QV shower wash and Eucerin Shower oil is good. Stop gardening for a while"
+        ],
+        "reports": [],
+        "created_at": "2025-07-24T16:59:47.108350",
+        "updated_at": "2025-07-25T15:48:50.759840"
+    }
+]

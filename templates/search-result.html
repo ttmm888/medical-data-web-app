@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Search Results - Medical Data Manager{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2>
+            <i class="bi bi-search me-2"></i>
+            Search Results
+        </h2>
+        <p class="text-muted">Found {{ results|length }} member(s) matching "{{ query }}"</p>
+    </div>
+</div>
+
+<div class="row g-3">
+    {% for member in results %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card search-result-card h-100" 
+             data-url="{{ url_for('view_member', member_id=member.member_id) }}"
+             style="cursor: pointer;">
+            <div class="card-body">
+                <h6 class="card-title text-capitalize">
+                    <i class="bi bi-person me-2"></i>
+                    {{ member.name }}
+                </h6>
+                <div class="mb-3">
+                    <small class="text-muted d-block">
+                        <i class="bi bi-credit-card me-1"></i>
+                        ID: {{ member.member_id }}
+                    </small>
+                    <small class="text-muted d-block">
+                        <i class="bi bi-calendar me-1"></i>
+                        Age: {{ member.age }} years
+                    </small>
+                    <small class="text-muted d-block">
+                        <i class="bi bi-gender-ambiguous me-1"></i>
+                        {{ member.gender }}
+                    </small>
+                </div>
+                
+                {% if member.doctors %}
+                <div class="mb-2">
+                    <small class="text-muted d-block">Doctors:</small>
+                    {% for doctor in member.doctors[:2] %}
+                        <span class="badge bg-primary me-1">{{ doctor.name }}</span>
+                    {% endfor %}
+                    {% if member.doctors|length > 2 %}
+                        <small class="text-muted">+{{ member.doctors|length - 2 }} more</small>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                <div class="text-end">
+                    <small class="text-muted">
+                        Added {{ member.created_at.strftime('%m/%d/%Y') }}
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row mt-4">
+    <div class="col-12 text-center">
+        <a href="{{ url_for('home') }}" class="btn btn-outline-primary">
+            <i class="bi bi-arrow-left me-2"></i>Back to Home
+        </a>
+        <a href="{{ url_for('add_member') }}" class="btn btn-primary ms-2">
+            <i class="bi bi-person-plus me-2"></i>Add New Member
+        </a>
+    </div>
+</div>
+
+<!-- JavaScript to handle card clicks -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Find all search result cards
+    const searchCards = document.querySelectorAll('.search-result-card');
+    
+    // Add click event listener to each card
+    searchCards.forEach(function(card) {
+        card.addEventListener('click', function() {
+            // Get the URL from the data-url attribute
+            const url = this.getAttribute('data-url');
+            
+            // Navigate to the member page
+            if (url) {
+                window.location.href = url;
+            }
+        });
+        
+        // Add hover effect for better user experience
+        card.addEventListener('mouseenter', function() {
+            this.style.transform = 'translateY(-2px)';
+            this.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
+            this.style.transition = 'all 0.2s ease';
+        });
+        
+        card.addEventListener('mouseleave', function() {
+            this.style.transform = 'translateY(0)';
+            this.style.boxShadow = '';
+        });
+    });
+});
+</script>
+
+<!-- Optional: Add some CSS for better visual feedback -->
+<style>
+.search-result-card:hover {
+    background-color: #f8f9fa;
+}
+
+.search-result-card {
+    transition: all 0.2s ease;
+}
+</style>
+{% endblock %}
