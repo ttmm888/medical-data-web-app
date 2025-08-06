@@ -1,5 +1,5 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify,session
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from datetime import datetime, date, timedelta
@@ -7,11 +7,19 @@ from werkzeug.utils import secure_filename
 import uuid
 import string
 import random
+from flask_login import UserMixin,LoginManager, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+import boto3
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
-# In your app.py
-DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///medical.db')
+users_db = {}
+
+DATABASE_URL = os.getenv('DATABASE_URL')
 
 # Railway can provide PostgreSQL for free
 if DATABASE_URL.startswith("postgres://"):
@@ -19,7 +27,7 @@ if DATABASE_URL.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+app.secret_key = os.getenv('SECRET_KEY')
 
 # File upload configuration
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16mb max file size
@@ -34,11 +42,16 @@ except Exception as e:
     app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+app.config['R2_ACCOUNT_ID'] = os.getenv('R2_ACCOUNT_ID')
+app.config['R2_ACCESS_KEY_ID'] = os.getenv('R2_ACCESS_KEY_ID')  
+app.config['R2_SECRET_ACCESS_KEY'] = os.getenv('R2_SECRET_ACCESS_KEY')
+app.config['R2_BUCKET_NAME'] = os.getenv('R2_BUCKET_NAME')
+
 # Initialize extensions
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
-# Your existing models (keep these as they are)
+
 class Member(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     member_id = db.Column(db.String(6), unique=True, nullable=False)
@@ -120,6 +133,64 @@ class MedicalFile(db.Model):
             'uploaded_at':self.uploaded_at.isoformat()
         }
     
+
+def get_r2_client():
+    """Create and return R2 client"""
+    try:
+        return boto3.client(
+            's3',
+            endpoint_url=f'https://{app.config["R2_ACCOUNT_ID"]}.r2.cloudflarestorage.com',
+            aws_access_key_id=app.config['R2_ACCESS_KEY_ID'],
+            aws_secret_access_key=app.config['R2_SECRET_ACCESS_KEY']
+        )
+    except Exception as e:
+        print(f"R2 client creation failed: {e}")
+        return None
+
+def upload_to_r2(file, filename):
+    """Upload file to Cloudflare R2"""
+    try:
+        r2_client = get_r2_client()
+        if not r2_client:
+            return None
+            
+        # Reset file pointer to beginning
+        file.seek(0)
+        
+        # Upload file
+        r2_client.upload_fileobj(
+            file,
+            app.config['R2_BUCKET_NAME'],
+            filename,
+            ExtraArgs={
+                'ContentType': file.content_type,
+                'ACL': 'public-read'  # Make file publicly accessible
+            }
+        )
+        
+        # Return public URL
+        return f"https://pub-{app.config['R2_ACCOUNT_ID']}.r2.dev/{filename}"
+        
+    except ClientError as e:
+        print(f"R2 upload failed: {e}")
+        return None
+
+def delete_from_r2(filename):
+    """Delete file from R2"""
+    try:
+        r2_client = get_r2_client()
+        if not r2_client:
+            return False
+            
+        r2_client.delete_object(
+            Bucket=app.config['R2_BUCKET_NAME'],
+            Key=filename
+        )
+        return True
+        
+    except ClientError as e:
+        print(f"R2 delete failed: {e}")
+        return False
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -294,6 +365,7 @@ def test():
         <p><a href="/init-db">Try Database Initialization</a></p>
         """
 
+
 @app.route('/add-member',methods=['GET'])
 def add_member():
    return render_template('add-member.html')
@@ -357,6 +429,7 @@ def add_member_post():
         flash(f"An error occurred:{str(e)}","error")
         return redirect(url_for('home'))
     
+
 @app.route('/view-member/<member_id>')
 def view_member(member_id):
     member=Member.query.filter_by(member_id=member_id).first()
