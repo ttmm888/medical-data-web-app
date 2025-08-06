@@ -363,70 +363,71 @@ def test():
         <p><a href="/init-db">Try Database Initialization</a></p>
         """
 
-
-@app.route('/add-member',methods=['GET'])
+@app.route('/add-member', methods=['GET', 'POST'])
 def add_member():
-   return render_template('add-member.html')
+    if request.method == 'POST':
+        try: 
+            name = request.form.get('name')
+            date_of_birth = request.form.get('date_of_birth')
+            gender = request.form.get('gender')
+            underlying = request.form.get('underlying', '').strip()
+            drug_allergy = request.form.get('drug_allergy', '').strip()
 
-@app.route('/add-member',methods=['POST'])
-def add_member_post():
-    try: 
-        name=request.form.get('name')
-        date_of_birth=request.form.get('date_of_birth')
-        gender=request.form.get('gender')
-        underlying=request.form.get('underlying', '').strip()  # Keep as string
-        drug_allergy=request.form.get('drug_allergy', '').strip()  # Keep as string
+            # Validation
+            if not name or not date_of_birth or not gender:
+                flash("Name, date of birth and gender are required!", "error")
+                return redirect(url_for('add_member'))
+
+            dob = datetime.strptime(date_of_birth, "%Y-%m-%d").date()
+
+            # Check duplicate
+            existing_member = Member.query.filter_by(
+                name=name.lower().strip(), 
+                date_of_birth=dob
+            ).first()
+            if existing_member:
+                flash("Member with the same name and date of birth already exists!", "error")
+                return redirect(url_for('home'))
+
+            # Create new member
+            new_member = Member(
+                member_id=generate_id(),
+                name=name.strip().lower(),
+                date_of_birth=dob,
+                age=calculate_age_from_date(dob),
+                gender=gender, 
+                drug_allergy=drug_allergy,
+                underlying=underlying
+            )
+            db.session.add(new_member)
+            db.session.flush()  # to get new_member.id
+
+            # Add related info
+            for doctor_name in split_lines(request.form.get('doctor', '')):
+                if doctor_name:
+                    db.session.add(Doctor(name=doctor_name, member_id=new_member.id))
+
+            for med_name in split_lines(request.form.get('medication', '')):
+                if med_name:
+                    db.session.add(Medication(name=med_name, member_id=new_member.id))
+
+            for diag_name in split_lines(request.form.get('diagnosis', '')):
+                if diag_name:
+                    db.session.add(Diagnosis(name=diag_name, member_id=new_member.id))
+
+            db.session.commit()
+
+            flash("Member added successfully!", "success")
+            return redirect(url_for('view_member', member_id=new_member.member_id))  # redirect to member page
         
-        if not name or not date_of_birth or not gender:
-            flash("Name,date of birth and gender are required!","error")
-            return redirect(url_for('add_member'))
-        
-        dob=datetime.strptime(date_of_birth,"%Y-%m-%d").date()
-
-        existing_member=Member.query.filter_by(name=name.lower().strip(),date_of_birth=dob).first()
-
-        if existing_member:
-            flash("Member with the same name and date of birth already exists!","error")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"An error occurred: {str(e)}", "error")
             return redirect(url_for('home'))
 
-        new_member = Member(
-            member_id=generate_id(),
-            name=name.strip().lower(),
-            date_of_birth=dob,
-            age=calculate_age_from_date(dob),
-            gender=gender, 
-            drug_allergy=drug_allergy,
-            underlying=underlying
-        )
-            
-        db.session.add(new_member)
-        db.session.flush()
+    # GET: Show form
+    return render_template('add-member.html')
 
-        # Use split_lines for these fields (they should be lists)
-        for doctor_name in split_lines(request.form.get('doctor','')):
-            if doctor_name:
-                doctor=Doctor(name=doctor_name,member_id=new_member.id)
-                db.session.add(doctor)
-
-        for med_name in split_lines(request.form.get('medication',"")):
-            if med_name:
-                medication=Medication(name=med_name,member_id=new_member.id)
-                db.session.add(medication)
-
-        for diag_name in split_lines(request.form.get('diagnosis',"")):
-            if diag_name:
-                diagnosis=Diagnosis(name=diag_name,member_id=new_member.id)
-                db.session.add(diagnosis)
-
-        db.session.commit()
-        flash("Member added successfully!","success")
-        return redirect(url_for('view_member', member_id=new_member.member_id))
-    
-    except Exception as e:
-        db.session.rollback()
-        flash(f"An error occurred:{str(e)}","error")
-        return redirect(url_for('home'))
-    
 
 @app.route('/view-member/<member_id>')
 def view_member(member_id):
