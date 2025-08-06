@@ -7,6 +7,8 @@ from werkzeug.utils import secure_filename
 import uuid
 import string
 import random
+import boto3
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 load_dotenv()
