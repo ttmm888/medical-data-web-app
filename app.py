@@ -18,10 +18,10 @@ app = Flask(__name__)
 users_db = {}
 
 DATABASE_URL = os.getenv('DATABASE_URL')
-
-# Railway can provide PostgreSQL for free
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///medical.db'
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    # PostgreSQL-specific code here
+    pass
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
