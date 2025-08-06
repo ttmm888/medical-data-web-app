@@ -739,6 +739,17 @@ def export_members():
         
     except Exception as e:
         return f"Export failed: {str(e)}"
+    
+@app.route('/test-db')
+def test_database():
+    try:
+        # Try to connect to database
+        from sqlalchemy import text
+        result = db.session.execute(text('SELECT version()'))
+        version = result.fetchone()[0]
+        return f"✅ Database connected! PostgreSQL version: {version}"
+    except Exception as e:
+        return f"❌ Database connection failed: {str(e)}"
 
 if __name__ == '__main__':
     print("Starting Medical App...")
