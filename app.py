@@ -7,10 +7,6 @@ from werkzeug.utils import secure_filename
 import uuid
 import string
 import random
-from flask_login import UserMixin,LoginManager, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
-import boto3
-from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 load_dotenv()
