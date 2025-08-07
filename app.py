@@ -211,39 +211,70 @@ def create_tables():
     """Create database tables with proper error handling"""
     try:
         with app.app_context():
+            print("Checking database connection...")
+            
+            # Test database connection first
+            try:
+                db.engine.connect()
+                print("✅ Database connection successful")
+            except Exception as e:
+                print(f"❌ Database connection failed: {e}")
+                raise e
+            
             # Check if tables already exist
             from sqlalchemy import inspect
             inspector = inspect(db.engine)
             existing_tables = inspector.get_table_names()
             
-            if not existing_tables:
-                print("No tables found. Creating new tables...")
-                db.create_all()
-                print("Database tables created successfully!")
-            else:
-                print(f"Tables already exist: {existing_tables}")
-                # Ensure all required tables exist
-                required_tables = ['member', 'doctor', 'medication', 'diagnosis', 'medical_file']
-                missing_tables = [table for table in required_tables if table not in existing_tables]
-                
-                if missing_tables:
-                    print(f"Creating missing tables: {missing_tables}")
-                    db.create_all()
-                    print("Missing tables created successfully!")
+            print(f"Existing tables: {existing_tables}")
             
-            # Verify tables were created
-            final_tables = inspector.get_table_names()
-            print(f"Final database tables: {final_tables}")
+            if not existing_tables or 'member' not in existing_tables:
+                print("Creating database tables...")
+                db.create_all()
+                
+                # Verify tables were created
+                new_tables = inspector.get_table_names()
+                print(f"✅ Tables created successfully: {new_tables}")
+            else:
+                print("✅ All required tables already exist")
             
     except Exception as e:
-        print(f"Database creation error: {e}")
-        print("Attempting to create tables anyway...")
-        try:
-            db.create_all()
-            print("Tables created on second attempt!")
-        except Exception as e2:
-            print(f"Second attempt failed: {e2}")
-            raise e2
+        print(f"❌ Database creation error: {e}")
+        print("This might cause 500 errors when trying to add members!")
+        raise e
+
+# Add this debug route to test your database
+@app.route('/debug-db')
+def debug_database():
+    try:
+        # Test database connection
+        db.engine.connect()
+        
+        # Check tables
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        tables = inspector.get_table_names()
+        
+        # Try to count members
+        member_count = Member.query.count()
+        
+        return f"""
+        <h1>Database Debug Info</h1>
+        <p>✅ Database connected successfully</p>
+        <p>📊 Tables: {', '.join(tables)}</p>
+        <p>👥 Total members: {member_count}</p>
+        <p><a href="/add-member">Try Add Member</a></p>
+        <p><a href="/">Back to Home</a></p>
+        """
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return f"""
+        <h1>Database Debug - ERROR</h1>
+        <p>❌ Error: {str(e)}</p>
+        <pre>{error_trace}</pre>
+        <p><a href="/init-db">Initialize Database</a></p>
+        """
 
 def calculate_age_from_date(dob):
     today=date.today()
@@ -367,66 +398,135 @@ def test():
 def add_member():
     if request.method == 'POST':
         try: 
-            name = request.form.get('name')
-            date_of_birth = request.form.get('date_of_birth')
-            gender = request.form.get('gender')
+            # Get form data with better validation
+            name = request.form.get('name', '').strip()
+            date_of_birth = request.form.get('date_of_birth', '').strip()
+            gender = request.form.get('gender', '').strip()
             underlying = request.form.get('underlying', '').strip()
             drug_allergy = request.form.get('drug_allergy', '').strip()
+
+            print(f"Debug - Received form data: name='{name}', dob='{date_of_birth}', gender='{gender}'")
 
             # Validation
             if not name or not date_of_birth or not gender:
                 flash("Name, date of birth and gender are required!", "error")
                 return redirect(url_for('add_member'))
 
-            dob = datetime.strptime(date_of_birth, "%Y-%m-%d").date()
+            # Validate date format
+            try:
+                dob = datetime.strptime(date_of_birth, "%Y-%m-%d").date()
+                print(f"Debug - Parsed date: {dob}")
+            except ValueError as e:
+                print(f"Debug - Date parsing error: {e}")
+                flash("Invalid date format. Please use YYYY-MM-DD format.", "error")
+                return redirect(url_for('add_member'))
 
-            # Check duplicate
+            # Check duplicate with better logic
             existing_member = Member.query.filter_by(
-                name=name.lower().strip(), 
+                name=name.lower(), 
                 date_of_birth=dob
             ).first()
+            
             if existing_member:
+                print(f"Debug - Duplicate member found: {existing_member.name}")
                 flash("Member with the same name and date of birth already exists!", "error")
-                return redirect(url_for('home'))
+                return redirect(url_for('add_member'))
 
             # Create new member
             new_member = Member(
                 member_id=generate_id(),
-                name=name.strip().lower(),
+                name=name.lower(),  # Store in lowercase for consistency
                 date_of_birth=dob,
                 age=calculate_age_from_date(dob),
                 gender=gender, 
                 drug_allergy=drug_allergy,
                 underlying=underlying
             )
+            
+            print(f"Debug - Created new member object: {new_member.name}")
+            
+            # Add to database
             db.session.add(new_member)
-            db.session.flush()  # to get new_member.id
+            db.session.flush()  # This gets the ID without committing
+            print(f"Debug - Member added to session, ID: {new_member.id}")
 
-            # Add related info
-            for doctor_name in split_lines(request.form.get('doctor', '')):
-                if doctor_name:
-                    db.session.add(Doctor(name=doctor_name, member_id=new_member.id))
+            # Add related information
+            # Doctors
+            doctor_text = request.form.get('doctor', '').strip()
+            if doctor_text:
+                for doctor_name in split_lines(doctor_text):
+                    if doctor_name.strip():
+                        doctor = Doctor(name=doctor_name.strip(), member_id=new_member.id)
+                        db.session.add(doctor)
+                        print(f"Debug - Added doctor: {doctor_name}")
 
-            for med_name in split_lines(request.form.get('medication', '')):
-                if med_name:
-                    db.session.add(Medication(name=med_name, member_id=new_member.id))
+            # Medications
+            medication_text = request.form.get('medication', '').strip()
+            if medication_text:
+                for med_name in split_lines(medication_text):
+                    if med_name.strip():
+                        medication = Medication(name=med_name.strip(), member_id=new_member.id)
+                        db.session.add(medication)
+                        print(f"Debug - Added medication: {med_name}")
 
-            for diag_name in split_lines(request.form.get('diagnosis', '')):
-                if diag_name:
-                    db.session.add(Diagnosis(name=diag_name, member_id=new_member.id))
+            # Diagnoses
+            diagnosis_text = request.form.get('diagnosis', '').strip()
+            if diagnosis_text:
+                for diag_name in split_lines(diagnosis_text):
+                    if diag_name.strip():
+                        diagnosis = Diagnosis(name=diag_name.strip(), member_id=new_member.id)
+                        db.session.add(diagnosis)
+                        print(f"Debug - Added diagnosis: {diag_name}")
 
+            # Commit all changes
             db.session.commit()
+            print(f"Debug - Successfully committed member: {new_member.member_id}")
 
             flash("Member added successfully!", "success")
-            return redirect(url_for('view_member', member_id=new_member.member_id))  # redirect to member page
+            return redirect(url_for('view_member', member_id=new_member.member_id))
         
         except Exception as e:
+            # Rollback any changes if error occurs
             db.session.rollback()
-            flash(f"An error occurred: {str(e)}", "error")
-            return redirect(url_for('home'))
+            print(f"DEBUG ERROR in add_member: {str(e)}")
+            print(f"Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()  # This prints the full error trace
+            
+            flash(f"An error occurred while adding member: {str(e)}", "error")
+            return redirect(url_for('add_member'))
 
-    # GET: Show form
-    return render_template('add-member.html')
+    # GET request: Show the form
+    try:
+        return render_template('add-member.html')
+    except Exception as e:
+        print(f"DEBUG ERROR rendering template: {str(e)}")
+        # Return a simple HTML form if template fails
+        return '''
+        <html>
+        <body>
+        <h2>Add Member (Backup Form)</h2>
+        <form action="/add-member" method="POST">
+            <p><label>Name: <input type="text" name="name" required></label></p>
+            <p><label>Date of Birth: <input type="date" name="date_of_birth" required></label></p>
+            <p><label>Gender: 
+                <select name="gender" required>
+                    <option value="">Select</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                </select>
+            </label></p>
+            <p><label>Underlying: <textarea name="underlying"></textarea></label></p>
+            <p><label>Drug Allergy: <input type="text" name="drug_allergy"></label></p>
+            <p><label>Doctor: <textarea name="doctor"></textarea></label></p>
+            <p><label>Medication: <textarea name="medication"></textarea></label></p>
+            <p><label>Diagnosis: <textarea name="diagnosis"></textarea></label></p>
+            <p><input type="submit" value="Submit"></p>
+        </form>
+        <p><a href="/">Back to Home</a></p>
+        </body>
+        </html>
+        '''
 
 
 @app.route('/view-member/<member_id>')
@@ -527,7 +627,7 @@ def handle_medication_actions(member,form,action):
     if action=='add_medication':
         medication_name=form.get('new_medication',"").strip()
         if medication_name:
-            existing=Member.query.filter_by(name=medication_name,member_id=member.id).first()
+            existing=Medication.query.filter_by(name=medication_name,member_id=member.id).first()
             if not existing:
                 db.session.add(Medication(name=medication_name,member_id=member.id))
             else:
@@ -556,8 +656,8 @@ def handle_diagnosis_actions(member,form,action):
         diagnosis_name=form.get('new_diagnosis',"").strip()
         if diagnosis_name:
             existing=Diagnosis.query.filter_by(name=diagnosis_name,member_id=member.id).first()
-        if not existing:
-            db.session.add(Diagnosis(name=diagnosis_name,member_id=member.id))
+            if not existing:
+                db.session.add(Diagnosis(name=diagnosis_name,member_id=member.id))
         else:
             flash("Diagnosis already exists!","warning")
     
@@ -756,7 +856,7 @@ if __name__ == '__main__':
     print("Starting Medical App...")
     create_tables()
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True)
 else:
     # This runs when deployed (gunicorn)
     print("App started by gunicorn...")
