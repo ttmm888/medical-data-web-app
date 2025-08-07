@@ -200,48 +200,151 @@ def generate_unique_filename(filename):
     return f"{unique_id}.{ext}"
 
 def split_lines(text):
-    if isinstance(text,list):
-        return text
-    if not text:
+    """Split text into lines with better handling"""
+    if not text or not isinstance(text, str):
         return []
     
-    return [item.strip() for item in text.replace("\n",",").split(",") if item.strip()]
+    if isinstance(text, list):
+        return [item.strip() for item in text if item and item.strip()]
+    
+    # Handle various separators
+    separators = ['\n', ',', ';', '|']
+    items = [text]
+    
+    for sep in separators:
+        new_items = []
+        for item in items:
+            new_items.extend(item.split(sep))
+        items = new_items
+    
+    # Clean and filter items
+    return [item.strip() for item in items if item and item.strip() and len(item.strip()) > 0]
 
 def create_tables():
-    """Create database tables with proper error handling"""
+    """Enhanced table creation with better error handling"""
     try:
         with app.app_context():
-            print("Checking database connection...")
+            app.logger.info("🔧 Starting database setup...")
             
-            # Test database connection first
+            # Test connection first
             try:
-                db.engine.connect()
-                print("✅ Database connection successful")
-            except Exception as e:
-                print(f"❌ Database connection failed: {e}")
-                raise e
+                connection = db.engine.connect()
+                connection.close()
+                app.logger.info("✅ Database connection successful")
+            except Exception as conn_error:
+                app.logger.error(f"❌ Database connection failed: {conn_error}")
+                # Don't fail here, let SQLAlchemy retry
             
-            # Check if tables already exist
+            # Check/create tables
             from sqlalchemy import inspect
-            inspector = inspect(db.engine)
-            existing_tables = inspector.get_table_names()
-            
-            print(f"Existing tables: {existing_tables}")
-            
-            if not existing_tables or 'member' not in existing_tables:
-                print("Creating database tables...")
-                db.create_all()
+            try:
+                inspector = inspect(db.engine)
+                existing_tables = inspector.get_table_names()
+                app.logger.info(f"📋 Existing tables: {existing_tables}")
                 
-                # Verify tables were created
-                new_tables = inspector.get_table_names()
-                print(f"✅ Tables created successfully: {new_tables}")
-            else:
-                print("✅ All required tables already exist")
-            
+                required_tables = {'member', 'doctor', 'medication', 'diagnosis', 'medical_file'}
+                missing_tables = required_tables - set(existing_tables)
+                
+                if missing_tables:
+                    app.logger.info(f"🏗️ Creating missing tables: {missing_tables}")
+                    db.create_all()
+                    
+                    # Verify creation
+                    new_tables = inspector.get_table_names()
+                    app.logger.info(f"✅ Tables after creation: {new_tables}")
+                else:
+                    app.logger.info("✅ All required tables exist")
+                    
+            except Exception as table_error:
+                app.logger.error(f"❌ Table management error: {table_error}")
+                # Try to create anyway
+                try:
+                    db.create_all()
+                    app.logger.info("✅ Created tables despite inspection error")
+                except Exception as create_error:
+                    app.logger.error(f"❌ Table creation failed: {create_error}")
+                    raise create_error
+                    
     except Exception as e:
-        print(f"❌ Database creation error: {e}")
-        print("This might cause 500 errors when trying to add members!")
+        app.logger.error(f"❌ Database setup failed: {e}")
         raise e
+    
+# Add database health check
+@app.route('/db-health')
+def database_health():
+    """Check database health and connection"""
+    try:
+        # Test connection
+        db.engine.connect()
+        
+        # Test table existence
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        tables = inspector.get_table_names()
+        
+        # Test a simple query
+        try:
+            member_count = Member.query.count()
+            query_test = f"✅ Query successful - {member_count} members"
+        except Exception as e:
+            query_test = f"❌ Query failed: {e}"
+        
+        return {
+            "database_connected": True,
+            "database_url": DATABASE_URL[:50] + "..." if len(DATABASE_URL) > 50 else DATABASE_URL,
+            "tables": tables,
+            "query_test": query_test,
+            "sqlalchemy_version": db.__version__ if hasattr(db, '__version__') else "unknown"
+        }
+        
+    except Exception as e:
+        return {
+            "database_connected": False,
+            "error": str(e),
+            "database_url": DATABASE_URL[:50] + "..." if DATABASE_URL else "Not set"
+        }, 500
+
+def setup_database():
+    """Configure database with Railway-specific handling"""
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    
+    if not DATABASE_URL:
+        # Try Railway's PostgreSQL environment variables
+        PGHOST = os.environ.get('PGHOST')
+        PGPORT = os.environ.get('PGPORT', '5432')
+        PGUSER = os.environ.get('PGUSER')
+        PGPASSWORD = os.environ.get('PGPASSWORD')
+        PGDATABASE = os.environ.get('PGDATABASE')
+        
+        if all([PGHOST, PGUSER, PGPASSWORD, PGDATABASE]):
+            DATABASE_URL = f"postgresql://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
+            app.logger.info("✅ Constructed DATABASE_URL from Railway variables")
+        else:
+            # Fallback to SQLite for development
+            DATABASE_URL = 'sqlite:///medical.db'
+            app.logger.warning("⚠️ Using SQLite fallback - PostgreSQL not configured")
+    
+    # Fix postgres:// vs postgresql:// issue
+    if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        app.logger.info("✅ Fixed postgres:// URL format")
+    
+    return DATABASE_URL
+
+# Replace your database configuration with:
+DATABASE_URL = setup_database()
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Add connection pooling for Railway
+if 'postgresql://' in DATABASE_URL:
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_size': 10,
+        'pool_recycle': 120,
+        'pool_pre_ping': True,
+        'max_overflow': 20,
+        'pool_timeout': 30
+    }
 
 # Add this debug route to test your database
 @app.route('/debug-db')
@@ -281,11 +384,32 @@ def calculate_age_from_date(dob):
     return today.year- dob.year-((today.month,today.day)<(dob.month,dob.day))
 
 def generate_id(length=6):
-    while True:
-        characters=string.ascii_uppercase + string.digits
-        new_id=''.join(random.choice(characters)for _ in range(length))
-        if not Member.query.filter_by(member_id=new_id).first():
-            return new_id
+    """Generate unique member ID with better error handling"""
+    import string
+    import random
+    
+    max_attempts = 50
+    for attempt in range(max_attempts):
+        try:
+            characters = string.ascii_uppercase + string.digits
+            new_id = ''.join(random.choice(characters) for _ in range(length))
+            
+            # Check if ID already exists
+            existing = Member.query.filter_by(member_id=new_id).first()
+            if not existing:
+                return new_id
+                
+        except Exception as e:
+            app.logger.error(f"Error checking member ID uniqueness (attempt {attempt}): {e}")
+            if attempt > 10:  # After 10 attempts, try without database check
+                characters = string.ascii_uppercase + string.digits
+                return ''.join(random.choice(characters) for _ in range(length))
+    
+    # Fallback: timestamp-based ID
+    from datetime import datetime
+    timestamp = str(int(datetime.now().timestamp()))[-6:]
+    return f"M{timestamp}"
+
         
 @app.route('/init-db')
 def init_db():
