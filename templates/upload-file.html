@@ -41,21 +41,27 @@
                 </h5>
             </div>
             <div class="card-body p-4">
+                <!-- CSRF Token for security (Flask-WTF) -->
                 <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                    {{ csrf_token() }}
+                    
                     <!-- File Upload Area -->
                     <div class="mb-4">
                         <label for="file" class="form-label required">
                             <i class="bi bi-paperclip me-1"></i>
                             Select File
                         </label>
-                        <div class="file-upload-area">
-                            <input type="file" 
-                                   class="form-control" 
-                                   id="file" 
-                                   name="file" 
-                                   required 
-                                   accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx">
-                            <div id="file-info" class="text-center mt-3">
+                        <!-- Fixed file input - removed hidden positioning -->
+                        <input type="file" 
+                               class="form-control" 
+                               id="file" 
+                               name="file" 
+                               required 
+                               accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx"
+                               style="display: none;">
+                        
+                        <div class="file-upload-area" id="fileUploadArea">
+                            <div id="file-info" class="text-center">
                                 <i class="bi bi-cloud-upload display-4 text-muted"></i>
                                 <p class="mt-2 mb-1"><strong>Choose a file</strong> or drag and drop it here</p>
                                 <small class="text-muted">
@@ -104,7 +110,7 @@
                             Back to Member
                         </a>
                         
-                        <button type="submit" class="btn btn-primary px-4">
+                        <button type="submit" class="btn btn-primary px-4" id="uploadBtn">
                             <span class="btn-text">
                                 <i class="bi bi-upload me-2"></i>
                                 Upload File
@@ -194,7 +200,6 @@
     text-align: center;
     transition: all 0.3s ease;
     background-color: #f8f9fa;
-    position: relative;
     cursor: pointer;
 }
 
@@ -207,17 +212,6 @@
     border-color: #0d6efd;
     background-color: #e7f1ff;
     transform: scale(1.02);
-}
-
-.file-upload-area input[type="file"] {
-    /* Make file input invisible but still functional */
-    opacity: 0;
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 1px;
-    height: 1px;
-    z-index: -1;
 }
 
 .file-upload-area.file-selected {
@@ -242,129 +236,139 @@
 
 {% block extra_js %}
 <script>
-    // Enhanced file upload handling
-    document.addEventListener('DOMContentLoaded', function() {
-        const form = document.getElementById('uploadForm');
-        const fileInput = document.getElementById('file');
-        const uploadArea = document.querySelector('.file-upload-area');
-        const fileInfo = document.getElementById('file-info');
+// File upload functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('uploadForm');
+    const fileInput = document.getElementById('file');
+    const uploadArea = document.getElementById('fileUploadArea');
+    const fileInfo = document.getElementById('file-info');
+    const uploadBtn = document.getElementById('uploadBtn');
+    
+    // Debug: Check if elements exist
+    console.log('Form:', form);
+    console.log('File input:', fileInput);
+    console.log('Upload area:', uploadArea);
+    
+    // File input change handler
+    fileInput.addEventListener('change', function(e) {
+        console.log('File input changed:', this.files);
+        const file = this.files[0];
+        if (file) {
+            updateFileDisplay(file);
+        } else {
+            resetFileDisplay();
+        }
+    });
+    
+    // Click to open file dialog
+    uploadArea.addEventListener('click', function(e) {
+        e.preventDefault();
+        console.log('Upload area clicked');
+        fileInput.click();
+    });
+    
+    // Drag and drop handlers
+    uploadArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.classList.add('dragover');
+    });
+    
+    uploadArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.classList.remove('dragover');
+    });
+    
+    uploadArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.classList.remove('dragover');
         
-        // File upload form submission
-        form.addEventListener('submit', function(e) {
-            const file = fileInput.files[0];
-            if (!file) {
-                e.preventDefault();
-                if (typeof MedicalApp !== 'undefined') {
-                    MedicalApp.showAlert('Please select a file to upload.', 'warning');
-                } else {
-                    alert('Please select a file to upload.');
-                }
-                return;
-            }
-            
-            // Check file size (16MB limit)
-            if (file.size > 16 * 1024 * 1024) {
-                e.preventDefault();
-                if (typeof MedicalApp !== 'undefined') {
-                    MedicalApp.showAlert('File size exceeds 16MB limit. Please choose a smaller file.', 'error');
-                } else {
-                    alert('File size exceeds 16MB limit. Please choose a smaller file.');
-                }
-                return;
-            }
-            
-            // Show loading state
-            const btn = form.querySelector('button[type="submit"]');
-            btn.classList.add('loading');
-            btn.disabled = true;
-        });
+        const files = e.dataTransfer.files;
+        console.log('Files dropped:', files);
         
-        // File selection feedback
-        fileInput.addEventListener('change', function() {
-            const file = this.files[0];
-            if (file) {
+        if (files.length > 0) {
+            const file = files[0];
+            
+            // Validate file type
+            if (isValidFileType(file)) {
+                // Manually set the files to the input
+                fileInput.files = files;
                 updateFileDisplay(file);
             } else {
-                resetFileDisplay();
+                showAlert('Invalid file type. Please select a supported file format.', 'error');
             }
-        });
-        
-        // Drag and drop functionality
-        uploadArea.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            this.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', function(e) {
-            e.preventDefault();
-            this.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', function(e) {
-            e.preventDefault();
-            this.classList.remove('dragover');
-            
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                // Check if file type is allowed
-                const allowedTypes = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.doc', '.docx'];
-                const fileName = files[0].name.toLowerCase();
-                const isAllowed = allowedTypes.some(type => fileName.endsWith(type));
-                
-                if (isAllowed) {
-                    fileInput.files = files;
-                    updateFileDisplay(files[0]);
-                } else {
-                    if (typeof MedicalApp !== 'undefined') {
-                        MedicalApp.showAlert('Invalid file type. Please select a supported file format.', 'error');
-                    } else {
-                        alert('Invalid file type. Please select a supported file format.');
-                    }
-                }
-            }
-        });
-        
-        // Update file display without breaking the input
-        function updateFileDisplay(file) {
-            const sizeInMB = (file.size / 1024 / 1024).toFixed(2);
-            
-            // Update the display info only, don't replace the input
-            fileInfo.innerHTML = `
-                <i class="bi bi-file-check display-4 text-success"></i>
-                <p class="mt-2 mb-1"><strong>${file.name}</strong></p>
-                <small class="text-muted">${sizeInMB} MB • Click to change file</small>
-            `;
-            
-            uploadArea.classList.add('file-selected');
         }
-        
-        // Reset file display
-        function resetFileDisplay() {
-            fileInfo.innerHTML = `
-                <i class="bi bi-cloud-upload display-4 text-muted"></i>
-                <p class="mt-2 mb-1"><strong>Choose a file</strong> or drag and drop it here</p>
-                <small class="text-muted">
-                    Supported formats: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX (Max: 16MB)
-                </small>
-            `;
-            
-            uploadArea.classList.remove('file-selected');
-        }
-        
-        // Click anywhere in upload area to trigger file selection
-        uploadArea.addEventListener('click', function(e) {
-            // Only trigger file selection when clicking in the upload area itself
-            if (e.target === this || e.target === fileInfo || fileInfo.contains(e.target)) {
-                e.preventDefault();
-                fileInput.click();
-            }
-        });
-        
-        // Prevent form submission when clicking the upload area
-        uploadArea.addEventListener('submit', function(e) {
-            e.preventDefault();
-        });
     });
+    
+    // Form submission handler
+    form.addEventListener('submit', function(e) {
+        console.log('Form submitting...');
+        console.log('Selected files:', fileInput.files);
+        
+        const file = fileInput.files[0];
+        if (!file) {
+            e.preventDefault();
+            showAlert('Please select a file to upload.', 'warning');
+            return false;
+        }
+        
+        // Validate file size (16MB = 16 * 1024 * 1024 bytes)
+        if (file.size > 16 * 1024 * 1024) {
+            e.preventDefault();
+            showAlert('File size exceeds 16MB limit. Please choose a smaller file.', 'error');
+            return false;
+        }
+        
+        // Show loading state
+        uploadBtn.classList.add('loading');
+        uploadBtn.disabled = true;
+        
+        console.log('File upload started for:', file.name);
+    });
+    
+    // Helper functions
+    function isValidFileType(file) {
+        const allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.doc', '.docx'];
+        const fileName = file.name.toLowerCase();
+        return allowedExtensions.some(ext => fileName.endsWith(ext));
+    }
+    
+    function updateFileDisplay(file) {
+        const sizeInMB = (file.size / 1024 / 1024).toFixed(2);
+        
+        fileInfo.innerHTML = `
+            <i class="bi bi-file-check display-4 text-success"></i>
+            <p class="mt-2 mb-1"><strong>${file.name}</strong></p>
+            <small class="text-muted">${sizeInMB} MB • Click to change file</small>
+        `;
+        
+        uploadArea.classList.add('file-selected');
+    }
+    
+    function resetFileDisplay() {
+        fileInfo.innerHTML = `
+            <i class="bi bi-cloud-upload display-4 text-muted"></i>
+            <p class="mt-2 mb-1"><strong>Choose a file</strong> or drag and drop it here</p>
+            <small class="text-muted">
+                Supported formats: PDF, PNG, JPG, JPEG, GIF, DOC, DOCX (Max: 16MB)
+            </small>
+        `;
+        
+        uploadArea.classList.remove('file-selected');
+    }
+    
+    function showAlert(message, type) {
+        // Simple alert - you can replace with your preferred notification system
+        alert(message);
+        
+        // If you have a notification system, use it instead:
+        // if (typeof MedicalApp !== 'undefined') {
+        //     MedicalApp.showAlert(message, type);
+        // }
+    }
+});
 </script>
 {% endblock %}
 {% endblock %}
