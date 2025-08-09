@@ -132,63 +132,160 @@ class MedicalFile(db.Model):
         }
     
 
+def setup_r2_config():
+    """Setup and validate R2 configuration"""
+    r2_config = {
+        'account_id': os.getenv('R2_ACCOUNT_ID'),
+        'access_key': os.getenv('R2_ACCESS_KEY_ID'),
+        'secret_key': os.getenv('R2_SECRET_ACCESS_KEY'),
+        'bucket_name': os.getenv('R2_BUCKET_NAME')
+    }
+    
+    # Validate all required variables are present
+    missing_vars = [key for key, value in r2_config.items() if not value]
+    if missing_vars:
+        print(f"⚠️ Missing R2 environment variables: {missing_vars}")
+        print("Files will be stored locally instead of R2")
+        return None
+    
+    print("✅ R2 configuration loaded successfully")
+    return r2_config
+
+# Initialize R2 config
+R2_CONFIG = setup_r2_config()
+
 def get_r2_client():
-    """Create and return R2 client"""
+    """Create and return R2 client with better error handling"""
+    if not R2_CONFIG:
+        return None
+        
     try:
         return boto3.client(
             's3',
-            endpoint_url=f'https://{app.config["R2_ACCOUNT_ID"]}.r2.cloudflarestorage.com',
-            aws_access_key_id=app.config['R2_ACCESS_KEY_ID'],
-            aws_secret_access_key=app.config['R2_SECRET_ACCESS_KEY']
+            endpoint_url=f'https://{R2_CONFIG["account_id"]}.r2.cloudflarestorage.com',
+            aws_access_key_id=R2_CONFIG['access_key'],
+            aws_secret_access_key=R2_CONFIG['secret_key'],
+            region_name='auto'  # R2 uses 'auto' region
         )
     except Exception as e:
-        print(f"R2 client creation failed: {e}")
+        print(f"❌ R2 client creation failed: {e}")
         return None
 
-def upload_to_r2(file, filename):
-    """Upload file to Cloudflare R2"""
+def upload_to_r2(file, filename, member_id):
+    """Upload file to Cloudflare R2 with better organization"""
+    if not R2_CONFIG:
+        print("⚠️ R2 not configured, using local storage")
+        return None
+        
+    try:
+        r2_client = get_r2_client()
+        if not r2_client:
+            return None
+        
+        # Organize files by member ID
+        r2_key = f"members/{member_id}/{filename}"
+        
+        # Reset file pointer to beginning
+        file.seek(0)
+        
+        # Upload file with metadata
+        r2_client.upload_fileobj(
+            file,
+            R2_CONFIG['bucket_name'],
+            r2_key,
+            ExtraArgs={
+                'ContentType': file.content_type or 'application/octet-stream',
+                'Metadata': {
+                    'member_id': str(member_id),
+                    'uploaded_by': 'medical_app'
+                }
+            }
+        )
+        
+        # Return the R2 key (path) for storage in database
+        print(f"✅ File uploaded to R2: {r2_key}")
+        return r2_key
+        
+    except ClientError as e:
+        print(f"❌ R2 upload failed: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error uploading to R2: {e}")
+        return None
+
+def download_from_r2(r2_key):
+    """Generate a presigned URL for downloading from R2"""
+    if not R2_CONFIG:
+        return None
+        
     try:
         r2_client = get_r2_client()
         if not r2_client:
             return None
             
-        # Reset file pointer to beginning
-        file.seek(0)
-        
-        # Upload file
-        r2_client.upload_fileobj(
-            file,
-            app.config['R2_BUCKET_NAME'],
-            filename,
-            ExtraArgs={
-                'ContentType': file.content_type,
-                'ACL': 'public-read'  # Make file publicly accessible
-            }
+        # Generate presigned URL (valid for 1 hour)
+        url = r2_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': R2_CONFIG['bucket_name'],
+                'Key': r2_key
+            },
+            ExpiresIn=3600  # 1 hour
         )
+        return url
         
-        # Return public URL
-        return f"https://pub-{app.config['R2_ACCOUNT_ID']}.r2.dev/{filename}"
-        
-    except ClientError as e:
-        print(f"R2 upload failed: {e}")
+    except Exception as e:
+        print(f"❌ Error generating download URL: {e}")
         return None
 
-def delete_from_r2(filename):
+def delete_from_r2(r2_key):
     """Delete file from R2"""
+    if not R2_CONFIG:
+        return False
+        
     try:
         r2_client = get_r2_client()
         if not r2_client:
             return False
             
         r2_client.delete_object(
-            Bucket=app.config['R2_BUCKET_NAME'],
-            Key=filename
+            Bucket=R2_CONFIG['bucket_name'],
+            Key=r2_key
         )
+        print(f"✅ File deleted from R2: {r2_key}")
         return True
         
     except ClientError as e:
-        print(f"R2 delete failed: {e}")
+        print(f"❌ R2 delete failed: {e}")
         return False
+
+def test_r2_connection():
+    """Test R2 connection and bucket access"""
+    if not R2_CONFIG:
+        return False, "R2 not configured"
+        
+    try:
+        r2_client = get_r2_client()
+        if not r2_client:
+            return False, "Could not create R2 client"
+            
+        # Try to list objects in bucket (just to test connection)
+        r2_client.list_objects_v2(
+            Bucket=R2_CONFIG['bucket_name'],
+            MaxKeys=1
+        )
+        return True, "R2 connection successful"
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == 'NoSuchBucket':
+            return False, f"Bucket '{R2_CONFIG['bucket_name']}' does not exist"
+        elif error_code == 'AccessDenied':
+            return False, "Access denied - check your API token permissions"
+        else:
+            return False, f"R2 error: {error_code}"
+    except Exception as e:
+        return False, f"Connection failed: {str(e)}"
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -841,89 +938,137 @@ def api_get_member(member_id):
         return member.to_dict()
     return {'error':'Member not found'},404
 
-@app.route('/upload-file/<member_id>',methods=['POST','GET'])
+@app.route('/upload-file/<member_id>', methods=['POST', 'GET'])
 def upload_file(member_id):
-    member=Member.query.filter_by(member_id=member_id).first()
+    member = Member.query.filter_by(member_id=member_id).first()
     if not member:
-        flash("Member not found","error")
+        flash("Member not found", "error")
         return redirect(url_for('home'))
     
-    if request.method=='POST':
+    if request.method == 'POST':
         if 'file' not in request.files:
-            flash('No file selected',"error")
+            flash('No file selected', "error")
             return redirect(request.url) 
 
-        file=request.files['file']
-        description=request.form.get('description',"").strip()
+        file = request.files['file']
+        description = request.form.get('description', "").strip()
 
-        if file.filename=='':
-            flash("No file selected","error")
+        if file.filename == '':
+            flash("No file selected", "error")
             return redirect(request.url) 
 
         if file and allowed_file(file.filename):
             try:
-                original_filename=secure_filename(file.filename)
-                unique_filename=generate_unique_filename(original_filename)
-                file_path=os.path.join(app.config['UPLOAD_FOLDER'],unique_filename) 
+                # Generate secure filename
+                original_filename = secure_filename(file.filename)
+                unique_filename = generate_unique_filename(original_filename)
+                
+                # Try to upload to R2 first
+                r2_path = upload_to_r2(file, unique_filename, member_id)
+                
+                if r2_path:
+                    # R2 upload successful - store R2 path
+                    file_path = r2_path
+                    storage_type = 'r2'
+                    print(f"✅ File stored in R2: {r2_path}")
+                else:
+                    # R2 failed - fallback to local storage
+                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                    file.seek(0)  # Reset file pointer
+                    file.save(file_path)
+                    storage_type = 'local'
+                    print(f"⚠️ File stored locally: {file_path}")
 
-                file.save(file_path)
-                medical_file=MedicalFile(filename=original_filename,file_path=file_path,
-                                         file_size=os.path.getsize(file_path),
-                                         file_type=file.content_type,
-                                         description=description,
-                                         member_id=member.id
-                ) 
+                # Get file size
+                file.seek(0, 2)  # Seek to end
+                file_size = file.tell()
+                
+                # Create database record
+                medical_file = MedicalFile(
+                    filename=original_filename,
+                    file_path=file_path,
+                    file_size=file_size,
+                    file_type=file.content_type,
+                    description=description,
+                    member_id=member.id
+                )
+                
                 db.session.add(medical_file)
                 db.session.commit()
 
-                flash("File uploaded successfully",'success')
-                return redirect(url_for('view_member',member_id=member_id))
+                if storage_type == 'r2':
+                    flash("File uploaded successfully to cloud storage!", 'success')
+                else:
+                    flash("File uploaded successfully (local backup)!", 'warning')
+                    
+                return redirect(url_for('view_member', member_id=member_id))
 
             except Exception as e:
                 db.session.rollback()
-                flash(f"Error uploadinf file:{str(e)}","error")
+                flash(f"Error uploading file: {str(e)}", "error")
+                print(f"❌ Upload error: {e}")
         else:
-            flash("Invalid file type: Allowed PDF,Images, Word documents","error")
+            flash("Invalid file type. Allowed: PDF, Images, Word documents", "error")
 
-    return render_template('upload-file.html',member=member)
+    return render_template('upload-file.html', member=member)
 
 @app.route('/download-file/<int:file_id>')
 def download_file(file_id):
-    from flask import send_file
-    medical_file=MedicalFile.query.get_or_404(file_id)
+    from flask import send_file, redirect
+    
+    medical_file = MedicalFile.query.get_or_404(file_id)
 
     try:
-        if os.path.exists(medical_file.file_path):
-            return send_file(medical_file.file_path,
-                             as_attachment=True,
-                             download_name=medical_file.filename)
+        # Check if file is stored in R2 (path starts with 'members/')
+        if medical_file.file_path.startswith('members/'):
+            # File is in R2 - generate download URL
+            download_url = download_from_r2(medical_file.file_path)
+            if download_url:
+                return redirect(download_url)
+            else:
+                flash("Could not generate download link", "error")
+                return redirect(url_for('home'))
         else:
-            flash("File not found on server","error")
-            return redirect(url_for('home'))
+            # File is stored locally
+            if os.path.exists(medical_file.file_path):
+                return send_file(
+                    medical_file.file_path,
+                    as_attachment=True,
+                    download_name=medical_file.filename
+                )
+            else:
+                flash("File not found on server", "error")
+                return redirect(url_for('home'))
         
     except Exception as e:
-        flash(f"Error downloading file:{str(e)}","error")
+        flash(f"Error downloading file: {str(e)}", "error")
         return redirect(url_for('home'))
-    
 
-@app.route('/delete-file/<int:file_id>',methods=['POST'])
+@app.route('/delete-file/<int:file_id>', methods=['POST'])
 def delete_file(file_id):
-    medical_file=MedicalFile.query.get_or_404(file_id)
-    member_id=medical_file.member.member_id
+    medical_file = MedicalFile.query.get_or_404(file_id)
+    member_id = medical_file.member.member_id
 
     try:
-        if os.path.exists(medical_file.file_path):
-            os.remove(medical_file.file_path)
+        # Delete from storage
+        if medical_file.file_path.startswith('members/'):
+            # File is in R2
+            delete_from_r2(medical_file.file_path)
+        else:
+            # File is stored locally
+            if os.path.exists(medical_file.file_path):
+                os.remove(medical_file.file_path)
 
-            db.session.delete(medical_file)
-            db.session.commit()
-            flash('File deleted successfully',"success")
+        # Delete from database
+        db.session.delete(medical_file)
+        db.session.commit()
+        flash('File deleted successfully', "success")
 
     except Exception as e:
         db.session.rollback()
-        flash(f"Error deleting file:{str(e)}","error")
+        flash(f"Error deleting file: {str(e)}", "error")
     
-    return redirect(url_for('view_member',member_id=member_id))
+    return redirect(url_for('view_member', member_id=member_id))
 
 @app.route('/backup-data')
 def backup_data():
@@ -975,6 +1120,32 @@ def test_database():
         return f"✅ Database connected! PostgreSQL version: {version}"
     except Exception as e:
         return f"❌ Database connection failed: {str(e)}"
+
+@app.route('/test-r2')
+def test_r2():
+    """Test R2 configuration and connection"""
+    success, message = test_r2_connection()
+    
+    if success:
+        return f"""
+        <h1>✅ R2 Test Successful!</h1>
+        <p>{message}</p>
+        <p>Bucket: {R2_CONFIG['bucket_name'] if R2_CONFIG else 'Not configured'}</p>
+        <p>Account ID: {R2_CONFIG['account_id'] if R2_CONFIG else 'Not configured'}</p>
+        <p><a href="/">Back to Home</a></p>
+        """
+    else:
+        return f"""
+        <h1>❌ R2 Test Failed</h1>
+        <p>{message}</p>
+        <h3>Troubleshooting:</h3>
+        <ul>
+            <li>Check your environment variables in Railway</li>
+            <li>Verify your API token has correct permissions</li>
+            <li>Make sure the bucket name is correct</li>
+        </ul>
+        <p><a href="/">Back to Home</a></p>
+        """
 
 if __name__ == '__main__':
     print("Starting Medical App...")
