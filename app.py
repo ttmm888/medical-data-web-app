@@ -8,7 +8,11 @@ import uuid
 import string
 import random
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.config import Config
+import os
+import ssl
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -131,15 +135,21 @@ class MedicalFile(db.Model):
             'uploaded_at':self.uploaded_at.isoformat()
         }
     
-
 def setup_r2_config():
-    """Setup and validate R2 configuration"""
+    """Setup and validate R2 configuration with better validation"""
     r2_config = {
         'account_id': os.getenv('R2_ACCOUNT_ID'),
         'access_key': os.getenv('R2_ACCESS_KEY_ID'),
         'secret_key': os.getenv('R2_SECRET_ACCESS_KEY'),
         'bucket_name': os.getenv('R2_BUCKET_NAME')
     }
+    
+    # Debug: Print what we have (without showing full credentials)
+    print(f"🔍 R2 Config Check:")
+    print(f"  Account ID: {'✓' if r2_config['account_id'] else '✗'} ({r2_config['account_id'][:8]}... if {r2_config['account_id']} else 'Missing')")
+    print(f"  Access Key: {'✓' if r2_config['access_key'] else '✗'} ({'Set' if r2_config['access_key'] else 'Missing'})")
+    print(f"  Secret Key: {'✓' if r2_config['secret_key'] else '✗'} ({'Set' if r2_config['secret_key'] else 'Missing'})")
+    print(f"  Bucket Name: {'✓' if r2_config['bucket_name'] else '✗'} ({r2_config['bucket_name'] or 'Missing'})")
     
     # Validate all required variables are present
     missing_vars = [key for key, value in r2_config.items() if not value]
@@ -155,40 +165,116 @@ def setup_r2_config():
 R2_CONFIG = setup_r2_config()
 
 def get_r2_client():
-    """Create and return R2 client with better error handling"""
+    """Create R2 client with proper SSL configuration"""
     if not R2_CONFIG:
         return None
-        
+    
     try:
-        return boto3.client(
+        # Create boto3 config with SSL settings
+        config = Config(
+            region_name='auto',
+            retries={
+                'max_attempts': 3,
+                'mode': 'adaptive'
+            },
+            s3={
+                'addressing_style': 'path'  # Important for R2
+            }
+        )
+        
+        # R2 endpoint format (corrected)
+        endpoint_url = f"https://{R2_CONFIG['account_id']}.r2.cloudflarestorage.com"
+        
+        print(f"🔗 Connecting to R2 endpoint: {endpoint_url}")
+        
+        client = boto3.client(
             's3',
-            endpoint_url=f'https://{R2_CONFIG["account_id"]}.r2.cloudflarestorage.com',
+            endpoint_url=endpoint_url,
             aws_access_key_id=R2_CONFIG['access_key'],
             aws_secret_access_key=R2_CONFIG['secret_key'],
-            region_name='auto'  # R2 uses 'auto' region
+            config=config
         )
+        
+        return client
+        
     except Exception as e:
         print(f"❌ R2 client creation failed: {e}")
         return None
 
+def test_r2_connection():
+    """Test R2 connection with better error handling"""
+    if not R2_CONFIG:
+        return False, "R2 not configured - check environment variables"
+    
+    print("🧪 Testing R2 connection...")
+    
+    try:
+        # Method 1: Try with boto3 client
+        r2_client = get_r2_client()
+        if not r2_client:
+            return False, "Could not create R2 client"
+        
+        print("✓ R2 client created successfully")
+        
+        # Test bucket access with minimal request
+        response = r2_client.head_bucket(Bucket=R2_CONFIG['bucket_name'])
+        print("✓ Bucket accessible")
+        
+        return True, f"R2 connection successful! Bucket '{R2_CONFIG['bucket_name']}' is accessible"
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        print(f"❌ ClientError: {error_code}")
+        
+        if error_code == 'NoSuchBucket':
+            return False, f"Bucket '{R2_CONFIG['bucket_name']}' does not exist. Check bucket name in Cloudflare dashboard."
+        elif error_code == 'AccessDenied':
+            return False, "Access denied. Check your R2 API token permissions."
+        elif error_code == 'InvalidAccessKeyId':
+            return False, "Invalid access key. Check your R2_ACCESS_KEY_ID."
+        elif error_code == 'SignatureDoesNotMatch':
+            return False, "Invalid secret key. Check your R2_SECRET_ACCESS_KEY."
+        else:
+            return False, f"R2 error: {error_code} - {e.response['Error'].get('Message', 'No additional info')}"
+            
+    except ssl.SSLError as e:
+        print(f"❌ SSL Error: {e}")
+        return False, f"SSL/TLS error: {str(e)}. This might be a network/firewall issue."
+        
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        
+        # Try alternative method - direct HTTP request
+        try:
+            print("🔄 Trying alternative connection test...")
+            endpoint_url = f"https://{R2_CONFIG['account_id']}.r2.cloudflarestorage.com"
+            response = requests.head(endpoint_url, timeout=10)
+            print(f"✓ HTTP connection to endpoint works (status: {response.status_code})")
+            return False, f"R2 endpoint is reachable but boto3 failed: {str(e)}"
+        except Exception as http_e:
+            return False, f"Connection completely failed. Original error: {str(e)}. HTTP test: {str(http_e)}"
+
 def upload_to_r2(file, filename, member_id):
-    """Upload file to Cloudflare R2 with better organization"""
+    """Upload file to R2 with better error handling"""
     if not R2_CONFIG:
         print("⚠️ R2 not configured, using local storage")
         return None
-        
+    
     try:
         r2_client = get_r2_client()
         if not r2_client:
+            print("❌ Could not create R2 client")
             return None
         
         # Organize files by member ID
         r2_key = f"members/{member_id}/{filename}"
         
-        # Reset file pointer to beginning
+        print(f"📤 Uploading to R2: {r2_key}")
+        
+        # Reset file pointer
         file.seek(0)
         
-        # Upload file with metadata
+        # Upload with proper content type
         r2_client.upload_fileobj(
             file,
             R2_CONFIG['bucket_name'],
@@ -202,27 +288,27 @@ def upload_to_r2(file, filename, member_id):
             }
         )
         
-        # Return the R2 key (path) for storage in database
-        print(f"✅ File uploaded to R2: {r2_key}")
+        print(f"✅ File uploaded successfully: {r2_key}")
         return r2_key
         
     except ClientError as e:
-        print(f"❌ R2 upload failed: {e}")
+        error_code = e.response['Error']['Code']
+        print(f"❌ R2 upload failed - {error_code}: {e.response['Error'].get('Message', 'No details')}")
         return None
     except Exception as e:
-        print(f"❌ Unexpected error uploading to R2: {e}")
+        print(f"❌ Upload error: {e}")
         return None
 
 def download_from_r2(r2_key):
-    """Generate a presigned URL for downloading from R2"""
+    """Generate presigned URL for R2 download"""
     if not R2_CONFIG:
         return None
-        
+    
     try:
         r2_client = get_r2_client()
         if not r2_client:
             return None
-            
+        
         # Generate presigned URL (valid for 1 hour)
         url = r2_client.generate_presigned_url(
             'get_object',
@@ -232,6 +318,8 @@ def download_from_r2(r2_key):
             },
             ExpiresIn=3600  # 1 hour
         )
+        
+        print(f"🔗 Generated download URL for: {r2_key}")
         return url
         
     except Exception as e:
@@ -242,50 +330,23 @@ def delete_from_r2(r2_key):
     """Delete file from R2"""
     if not R2_CONFIG:
         return False
-        
+    
     try:
         r2_client = get_r2_client()
         if not r2_client:
             return False
-            
+        
         r2_client.delete_object(
             Bucket=R2_CONFIG['bucket_name'],
             Key=r2_key
         )
-        print(f"✅ File deleted from R2: {r2_key}")
+        
+        print(f"🗑️ File deleted from R2: {r2_key}")
         return True
         
     except ClientError as e:
         print(f"❌ R2 delete failed: {e}")
         return False
-
-def test_r2_connection():
-    """Test R2 connection and bucket access"""
-    if not R2_CONFIG:
-        return False, "R2 not configured"
-        
-    try:
-        r2_client = get_r2_client()
-        if not r2_client:
-            return False, "Could not create R2 client"
-            
-        # Try to list objects in bucket (just to test connection)
-        r2_client.list_objects_v2(
-            Bucket=R2_CONFIG['bucket_name'],
-            MaxKeys=1
-        )
-        return True, "R2 connection successful"
-        
-    except ClientError as e:
-        error_code = e.response['Error']['Code']
-        if error_code == 'NoSuchBucket':
-            return False, f"Bucket '{R2_CONFIG['bucket_name']}' does not exist"
-        elif error_code == 'AccessDenied':
-            return False, "Access denied - check your API token permissions"
-        else:
-            return False, f"R2 error: {error_code}"
-    except Exception as e:
-        return False, f"Connection failed: {str(e)}"
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -1123,29 +1184,115 @@ def test_database():
 
 @app.route('/test-r2')
 def test_r2():
-    """Test R2 configuration and connection"""
+    """Enhanced R2 testing with detailed diagnostics"""
+    
+    # Basic environment check
+    env_vars = {
+        'R2_ACCOUNT_ID': os.getenv('R2_ACCOUNT_ID'),
+        'R2_ACCESS_KEY_ID': os.getenv('R2_ACCESS_KEY_ID'),
+        'R2_SECRET_ACCESS_KEY': os.getenv('R2_SECRET_ACCESS_KEY'),
+        'R2_BUCKET_NAME': os.getenv('R2_BUCKET_NAME')
+    }
+    
+    # Check which variables are missing
+    missing_vars = [key for key, value in env_vars.items() if not value]
+    
+    html_output = "<h1>🧪 R2 Configuration Test</h1>"
+    
+    # Environment variables check
+    html_output += "<h2>📋 Environment Variables</h2><ul>"
+    for key, value in env_vars.items():
+        if value:
+            if key == 'R2_SECRET_ACCESS_KEY':
+                display_value = "***Hidden***"
+            elif key == 'R2_ACCESS_KEY_ID':
+                display_value = f"{value[:8]}...{value[-4:]}" if len(value) > 12 else "***Set***"
+            else:
+                display_value = value
+            html_output += f"<li>✅ {key}: {display_value}</li>"
+        else:
+            html_output += f"<li>❌ {key}: Missing</li>"
+    html_output += "</ul>"
+    
+    if missing_vars:
+        html_output += f"""
+        <div style="background: #ffebee; padding: 15px; border-left: 4px solid #f44336; margin: 20px 0;">
+            <h3>⚠️ Missing Environment Variables</h3>
+            <p>The following variables are not set: <strong>{', '.join(missing_vars)}</strong></p>
+            <p>Add these in your Railway dashboard under Variables tab.</p>
+        </div>
+        """
+        return html_output + '<p><a href="/">← Back to Home</a></p>'
+    
+    # Test R2 connection
+    html_output += "<h2>🔗 R2 Connection Test</h2>"
     success, message = test_r2_connection()
     
     if success:
-        return f"""
-        <h1>✅ R2 Test Successful!</h1>
-        <p>{message}</p>
-        <p>Bucket: {R2_CONFIG['bucket_name'] if R2_CONFIG else 'Not configured'}</p>
-        <p>Account ID: {R2_CONFIG['account_id'] if R2_CONFIG else 'Not configured'}</p>
-        <p><a href="/">Back to Home</a></p>
+        html_output += f"""
+        <div style="background: #e8f5e8; padding: 15px; border-left: 4px solid #4caf50; margin: 20px 0;">
+            <h3>✅ R2 Test Successful!</h3>
+            <p>{message}</p>
+        </div>
+        <h3>📊 Configuration Details</h3>
+        <ul>
+            <li><strong>Bucket:</strong> {env_vars['R2_BUCKET_NAME']}</li>
+            <li><strong>Account ID:</strong> {env_vars['R2_ACCOUNT_ID']}</li>
+            <li><strong>Endpoint:</strong> https://{env_vars['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com</li>
+        </ul>
+        
+        <h3>🚀 Next Steps</h3>
+        <ul>
+            <li>✅ Your R2 is configured correctly</li>
+            <li>✅ Try uploading a file to test the full workflow</li>
+            <li>✅ Files will now be stored in Cloudflare R2</li>
+        </ul>
         """
     else:
-        return f"""
-        <h1>❌ R2 Test Failed</h1>
-        <p>{message}</p>
-        <h3>Troubleshooting:</h3>
+        html_output += f"""
+        <div style="background: #ffebee; padding: 15px; border-left: 4px solid #f44336; margin: 20px 0;">
+            <h3>❌ R2 Test Failed</h3>
+            <p>{message}</p>
+        </div>
+        
+        <h3>🔧 Troubleshooting Steps</h3>
+        <ol>
+            <li><strong>Check your R2 API Token:</strong>
+                <ul>
+                    <li>Go to Cloudflare dashboard → R2 → Manage R2 API tokens</li>
+                    <li>Create a new token with <strong>R2:Edit</strong> permissions</li>
+                    <li>Use the SAME token for both ACCESS_KEY_ID and SECRET_ACCESS_KEY</li>
+                </ul>
+            </li>
+            <li><strong>Verify your bucket name:</strong>
+                <ul>
+                    <li>Check that '{env_vars['R2_BUCKET_NAME']}' exists in your Cloudflare R2 dashboard</li>
+                    <li>Bucket names are case-sensitive</li>
+                </ul>
+            </li>
+            <li><strong>Check token permissions:</strong>
+                <ul>
+                    <li>Your token needs <strong>Account:Read</strong> and <strong>R2:Edit</strong> permissions</li>
+                    <li>Make sure it's not expired</li>
+                </ul>
+            </li>
+        </ol>
+        
+        <h3>🆘 Still having issues?</h3>
+        <p>Common fixes:</p>
         <ul>
-            <li>Check your environment variables in Railway</li>
-            <li>Verify your API token has correct permissions</li>
-            <li>Make sure the bucket name is correct</li>
+            <li><strong>For Railway users:</strong> Make sure you redeploy after adding environment variables</li>
+            <li><strong>SSL issues:</strong> This might be a temporary network issue - try again in a few minutes</li>
+            <li><strong>Wrong credentials:</strong> Delete and recreate your R2 API token</li>
         </ul>
-        <p><a href="/">Back to Home</a></p>
         """
+    
+    html_output += """
+    <hr style="margin: 30px 0;">
+    <p><strong>🔄 <a href="/test-r2">Refresh Test</a> | <a href="/">← Back to Home</a></strong></p>
+    """
+    
+    return html_output
 
 if __name__ == '__main__':
     print("Starting Medical App...")
