@@ -165,51 +165,46 @@ def setup_r2_config():
 R2_CONFIG = setup_r2_config()
 
 def get_r2_client():
-    """Create R2 client with proper SSL configuration and environment variable check."""
+    """Create R2 client with environment variables and proper SSL configuration"""
 
-    # Get config from environment variables
-    R2_CONFIG = {
-        "account_id": os.getenv("R2_ACCOUNT_ID"),
-        "access_key": os.getenv("R2_ACCESS_KEY"),
-        "secret_key": os.getenv("R2_SECRET_KEY"),
-    }
+    # Pull values from environment variables
+    account_id = os.getenv("R2_ACCOUNT_ID")
+    access_key = os.getenv("R2_ACCESS_KEY")
+    secret_key = os.getenv("R2_SECRET_KEY")
 
-    # Debugging: Check if env vars are actually loaded
-    if not all(R2_CONFIG.values()):
-        print("❌ Missing one or more R2 environment variables!")
-        print(f"R2_ACCOUNT_ID: {R2_CONFIG['account_id']}")
-        print(f"R2_ACCESS_KEY: {'SET' if R2_CONFIG['access_key'] else 'MISSING'}")
-        print(f"R2_SECRET_KEY: {'SET' if R2_CONFIG['secret_key'] else 'MISSING'}")
+    # Basic validation
+    if not account_id or not access_key or not secret_key:
+        print("❌ Missing one or more R2 environment variables")
         return None
 
     try:
         # Create boto3 config with SSL settings
         config = Config(
-            region_name="auto",
+            region_name='auto',
             retries={
-                "max_attempts": 3,
-                "mode": "adaptive"
+                'max_attempts': 3,
+                'mode': 'adaptive'
             },
             s3={
-                "addressing_style": "path"  # Important for R2
+                'addressing_style': 'path'  # Important for R2
             }
         )
-
-        # Correct R2 endpoint
-        endpoint_url = f"https://{R2_CONFIG['account_id']}.r2.cloudflarestorage.com"
-
+        
+        # R2 endpoint format
+        endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
+        
         print(f"🔗 Connecting to R2 endpoint: {endpoint_url}")
-
+        
         client = boto3.client(
-            "s3",
+            's3',
             endpoint_url=endpoint_url,
-            aws_access_key_id=R2_CONFIG["access_key"],
-            aws_secret_access_key=R2_CONFIG["secret_key"],
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
             config=config
         )
-
+        
         return client
-
+        
     except Exception as e:
         print(f"❌ R2 client creation failed: {e}")
         return None
