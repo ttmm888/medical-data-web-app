@@ -41,9 +41,8 @@
                 </h5>
             </div>
             <div class="card-body p-4">
-                <!-- CSRF Token for security (Flask-WTF) -->
+                <!-- Form without CSRF for now - can be added later -->
                 <form method="POST" enctype="multipart/form-data" id="uploadForm">
-                    {{ csrf_token() }}
                     
                     <!-- File Upload Area -->
                     <div class="mb-4">
