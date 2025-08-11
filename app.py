@@ -31,6 +31,11 @@ app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = os.getenv('SECRET_KEY')
 
+app.config['R2_ACCOUNT_ID'] = os.getenv('R2_ACCOUNT_ID')
+app.config['R2_ACCESS_KEY_ID'] = os.getenv('R2_ACCESS_KEY_ID')  
+app.config['R2_SECRET_ACCESS_KEY'] = os.getenv('R2_SECRET_ACCESS_KEY')
+app.config['R2_BUCKET_NAME'] = os.getenv('R2_BUCKET_NAME')
+
 # File upload configuration
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16mb max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -43,11 +48,6 @@ except Exception as e:
     print(f"Could not create uploads folder: {e}")
     app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
-app.config['R2_ACCOUNT_ID'] = os.getenv('R2_ACCOUNT_ID')
-app.config['R2_ACCESS_KEY_ID'] = os.getenv('R2_ACCESS_KEY_ID')  
-app.config['R2_SECRET_ACCESS_KEY'] = os.getenv('R2_SECRET_ACCESS_KEY')
-app.config['R2_BUCKET_NAME'] = os.getenv('R2_BUCKET_NAME')
 
 # Initialize extensions
 db = SQLAlchemy(app)
