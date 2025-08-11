@@ -167,34 +167,24 @@ R2_CONFIG = setup_r2_config()
 def get_r2_client():
     """Create R2 client with environment variables and proper SSL configuration"""
 
-    # Pull values from environment variables
     account_id = os.getenv("R2_ACCOUNT_ID")
-    access_key = os.getenv("R2_ACCESS_KEY")
-    secret_key = os.getenv("R2_SECRET_KEY")
+    access_key = os.getenv("R2_ACCESS_KEY_ID")
+    secret_key = os.getenv("R2_SECRET_ACCESS_KEY")
 
-    # Basic validation
     if not account_id or not access_key or not secret_key:
         print("❌ Missing one or more R2 environment variables")
         return None
 
     try:
-        # Create boto3 config with SSL settings
         config = Config(
             region_name='auto',
-            retries={
-                'max_attempts': 3,
-                'mode': 'adaptive'
-            },
-            s3={
-                'addressing_style': 'path'  # Important for R2
-            }
+            retries={'max_attempts': 3, 'mode': 'adaptive'},
+            s3={'addressing_style': 'path'}
         )
-        
-        # R2 endpoint format
+
         endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
-        
         print(f"🔗 Connecting to R2 endpoint: {endpoint_url}")
-        
+
         client = boto3.client(
             's3',
             endpoint_url=endpoint_url,
@@ -202,9 +192,8 @@ def get_r2_client():
             aws_secret_access_key=secret_key,
             config=config
         )
-        
         return client
-        
+
     except Exception as e:
         print(f"❌ R2 client creation failed: {e}")
         return None
