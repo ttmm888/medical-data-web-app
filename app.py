@@ -1,4 +1,5 @@
 import os
+import io
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify,session
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -1020,27 +1021,28 @@ def upload_file(member_id):
                 # Generate secure filename
                 original_filename = secure_filename(file.filename)
                 unique_filename = generate_unique_filename(original_filename)
-                
+
+                # Read file once into memory
+                file_bytes = file.read()
+                file_size = len(file_bytes)  # safer than seeking
+                file_stream_for_r2 = io.BytesIO(file_bytes)
+
                 # Try to upload to R2 first
-                r2_path = upload_to_r2(file, unique_filename, member_id)
-                
+                r2_path = upload_to_r2(file_stream_for_r2, unique_filename, member_id)
+
                 if r2_path:
-                    # R2 upload successful - store R2 path
                     file_path = r2_path
                     storage_type = 'r2'
                     print(f"✅ File stored in R2: {r2_path}")
                 else:
-                    # R2 failed - fallback to local storage
-                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-                    file.seek(0)  # Reset file pointer
-                    file.save(file_path)
+                    # Fallback to local storage
+                    local_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                    with open(local_path, 'wb') as f:
+                        f.write(file_bytes)
+                    file_path = local_path
                     storage_type = 'local'
                     print(f"⚠️ File stored locally: {file_path}")
 
-                # Get file size
-                file.seek(0, 2)  # Seek to end
-                file_size = file.tell()
-                
                 # Create database record
                 medical_file = MedicalFile(
                     filename=original_filename,
