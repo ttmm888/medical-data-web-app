@@ -269,8 +269,18 @@ def upload_to_r2(file, filename, member_id):
         
         print(f"📤 Uploading to R2: {r2_key}")
         
-        # Reset file pointer
+        # Reset file pointer to beginning
         file.seek(0)
+        
+        # Get content type - handle both file objects and BytesIO objects
+        if hasattr(file, 'content_type'):
+            content_type = file.content_type or 'application/octet-stream'
+        else:
+            # For BytesIO objects, determine content type from filename
+            import mimetypes
+            content_type, _ = mimetypes.guess_type(filename)
+            if not content_type:
+                content_type = 'application/octet-stream'
         
         # Upload with proper content type
         r2_client.upload_fileobj(
@@ -278,7 +288,7 @@ def upload_to_r2(file, filename, member_id):
             R2_CONFIG['bucket_name'],
             r2_key,
             ExtraArgs={
-                'ContentType': file.content_type or 'application/octet-stream',
+                'ContentType': content_type,
                 'Metadata': {
                     'member_id': str(member_id),
                     'uploaded_by': 'medical_app'
@@ -296,6 +306,84 @@ def upload_to_r2(file, filename, member_id):
     except Exception as e:
         print(f"❌ Upload error: {e}")
         return None
+
+@app.route('/upload-file/<member_id>', methods=['POST', 'GET'])
+def upload_file(member_id):
+    member = Member.query.filter_by(member_id=member_id).first()
+    if not member:
+        flash("Member not found", "error")
+        return redirect(url_for('home'))
+    
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            flash('No file selected', "error")
+            return redirect(request.url) 
+
+        file = request.files['file']
+        description = request.form.get('description', "").strip()
+
+        if file.filename == '':
+            flash("No file selected", "error")
+            return redirect(request.url) 
+
+        if file and allowed_file(file.filename):
+            try:
+                # Generate secure filename
+                original_filename = secure_filename(file.filename)
+                unique_filename = generate_unique_filename(original_filename)
+
+                # Get file size
+                file.seek(0, 2)  # Seek to end
+                file_size = file.tell()  # Get position (file size)
+                file.seek(0)  # Reset to beginning
+
+                # Store original content type
+                original_content_type = file.content_type
+
+                # Try to upload to R2 first - pass the original file object
+                r2_path = upload_to_r2(file, unique_filename, member_id)
+
+                if r2_path:
+                    file_path = r2_path
+                    storage_type = 'r2'
+                    print(f"✅ File stored in R2: {r2_path}")
+                else:
+                    # Fallback to local storage
+                    file.seek(0)  # Reset file pointer for local save
+                    local_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                    file.save(local_path)  # Use Flask's save method
+                    file_path = local_path
+                    storage_type = 'local'
+                    print(f"⚠️ File stored locally: {file_path}")
+
+                # Create database record
+                medical_file = MedicalFile(
+                    filename=original_filename,
+                    file_path=file_path,
+                    file_size=file_size,
+                    file_type=original_content_type,
+                    description=description,
+                    member_id=member.id
+                )
+                
+                db.session.add(medical_file)
+                db.session.commit()
+
+                if storage_type == 'r2':
+                    flash("File uploaded successfully to cloud storage!", 'success')
+                else:
+                    flash("File uploaded successfully (local backup)!", 'warning')
+                    
+                return redirect(url_for('view_member', member_id=member_id))
+
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Error uploading file: {str(e)}", "error")
+                print(f"❌ Upload error: {e}")
+        else:
+            flash("Invalid file type. Allowed: PDF, Images, Word documents", "error")
+
+    return render_template('upload-file.html', member=member)
 
 def download_from_r2(r2_key):
     """Generate presigned URL for R2 download"""
