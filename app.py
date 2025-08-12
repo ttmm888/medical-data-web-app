@@ -1120,13 +1120,18 @@ def upload_file(member_id):
                 original_filename = secure_filename(file.filename)
                 unique_filename = generate_unique_filename(original_filename)
 
-                # Read file once into memory
-                file_bytes = file.read()
-                file_size = len(file_bytes)  # safer than seeking
-                file_stream_for_r2 = io.BytesIO(file_bytes)
+                # Get file size and store original content type
+                file.seek(0, 2)  # Seek to end
+                file_size = file.tell()  # Get position (file size)
+                file.seek(0)  # Reset to beginning
+                original_content_type = file.content_type
 
-                # Try to upload to R2 first
-                r2_path = upload_to_r2(file_stream_for_r2, unique_filename, member_id)
+                print(f"📁 Processing file: {original_filename}")
+                print(f"📏 File size: {file_size} bytes")
+                print(f"📄 Original content type: {original_content_type}")
+
+                # Try to upload to R2 first - pass the original file object
+                r2_path = upload_to_r2(file, unique_filename, member_id)
 
                 if r2_path:
                     file_path = r2_path
@@ -1134,9 +1139,10 @@ def upload_file(member_id):
                     print(f"✅ File stored in R2: {r2_path}")
                 else:
                     # Fallback to local storage
+                    print("🔄 Falling back to local storage...")
+                    file.seek(0)  # Reset file pointer for local save
                     local_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-                    with open(local_path, 'wb') as f:
-                        f.write(file_bytes)
+                    file.save(local_path)  # Use Flask's save method
                     file_path = local_path
                     storage_type = 'local'
                     print(f"⚠️ File stored locally: {file_path}")
@@ -1146,7 +1152,7 @@ def upload_file(member_id):
                     filename=original_filename,
                     file_path=file_path,
                     file_size=file_size,
-                    file_type=file.content_type,
+                    file_type=original_content_type,
                     description=description,
                     member_id=member.id
                 )
@@ -1165,6 +1171,8 @@ def upload_file(member_id):
                 db.session.rollback()
                 flash(f"Error uploading file: {str(e)}", "error")
                 print(f"❌ Upload error: {e}")
+                import traceback
+                traceback.print_exc()
         else:
             flash("Invalid file type. Allowed: PDF, Images, Word documents", "error")
 
