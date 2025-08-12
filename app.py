@@ -113,7 +113,7 @@ class Medication(db.Model):
 
 class Diagnosis(db.Model):
     id=db.Column(db.Integer,primary_key=True)
-    name=db.Column(db.String(100),nullable=False)
+    name=db.Column(db.String(1000),nullable=False)
     member_id=db.Column(db.Integer,db.ForeignKey('member.id'),nullable=False)
 
 class MedicalFile(db.Model):
