@@ -252,6 +252,7 @@ def test_r2_connection():
         except Exception as http_e:
             return False, f"Connection completely failed. Original error: {str(e)}. HTTP test: {str(http_e)}"
 
+# REPLACE your existing upload_to_r2 function with this:
 def upload_to_r2(file, filename, member_id):
     """Upload file to R2 with better error handling"""
     if not R2_CONFIG:
@@ -273,14 +274,16 @@ def upload_to_r2(file, filename, member_id):
         file.seek(0)
         
         # Get content type - handle both file objects and BytesIO objects
-        if hasattr(file, 'content_type'):
-            content_type = file.content_type or 'application/octet-stream'
+        if hasattr(file, 'content_type') and file.content_type:
+            content_type = file.content_type
         else:
-            # For BytesIO objects, determine content type from filename
+            # For BytesIO objects or when content_type is None, determine from filename
             import mimetypes
             content_type, _ = mimetypes.guess_type(filename)
             if not content_type:
                 content_type = 'application/octet-stream'
+        
+        print(f"📄 Content type: {content_type}")
         
         # Upload with proper content type
         r2_client.upload_fileobj(
@@ -307,6 +310,8 @@ def upload_to_r2(file, filename, member_id):
         print(f"❌ Upload error: {e}")
         return None
 
+
+# REPLACE your existing upload_file route with this:
 @app.route('/upload-file/<member_id>', methods=['POST', 'GET'])
 def upload_file(member_id):
     member = Member.query.filter_by(member_id=member_id).first()
@@ -332,13 +337,15 @@ def upload_file(member_id):
                 original_filename = secure_filename(file.filename)
                 unique_filename = generate_unique_filename(original_filename)
 
-                # Get file size
+                # Get file size and store original content type
                 file.seek(0, 2)  # Seek to end
                 file_size = file.tell()  # Get position (file size)
                 file.seek(0)  # Reset to beginning
-
-                # Store original content type
                 original_content_type = file.content_type
+
+                print(f"📁 Processing file: {original_filename}")
+                print(f"📏 File size: {file_size} bytes")
+                print(f"📄 Original content type: {original_content_type}")
 
                 # Try to upload to R2 first - pass the original file object
                 r2_path = upload_to_r2(file, unique_filename, member_id)
@@ -349,6 +356,7 @@ def upload_file(member_id):
                     print(f"✅ File stored in R2: {r2_path}")
                 else:
                     # Fallback to local storage
+                    print("🔄 Falling back to local storage...")
                     file.seek(0)  # Reset file pointer for local save
                     local_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
                     file.save(local_path)  # Use Flask's save method
@@ -380,6 +388,8 @@ def upload_file(member_id):
                 db.session.rollback()
                 flash(f"Error uploading file: {str(e)}", "error")
                 print(f"❌ Upload error: {e}")
+                import traceback
+                traceback.print_exc()
         else:
             flash("Invalid file type. Allowed: PDF, Images, Word documents", "error")
 
