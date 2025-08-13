@@ -1,7 +1,7 @@
 import os
 import io
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify,session
-from flask_sqlalchemy import SQLAlchemy, text 
+from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from datetime import datetime, date, timedelta
 from werkzeug.utils import secure_filename
