@@ -1,7 +1,7 @@
 import os
 import io
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify,session
-from flask_sqlalchemy import SQLAlchemy
+from flask_sqlalchemy import SQLAlchemy, text 
 from flask_migrate import Migrate
 from datetime import datetime, date, timedelta
 from werkzeug.utils import secure_filename
@@ -1311,6 +1311,27 @@ def test_r2():
     """
     
     return html_output
+
+@app.route('/test-long-diagnosis')
+def test_long_diagnosis():
+    """Test if long diagnosis works"""
+    try:
+        # Find a test member or create one
+        member = Member.query.first()
+        if not member:
+            return "❌ No members found. Add a member first."
+        
+        # Try to add a long diagnosis
+        long_text = "A" * 500  # 500 character diagnosis
+        test_diagnosis = Diagnosis(name=long_text, member_id=member.id)
+        db.session.add(test_diagnosis)
+        db.session.commit()
+        
+        return f"✅ Successfully added long diagnosis ({len(long_text)} characters)"
+        
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Long diagnosis failed: {str(e)}"
 
 if __name__ == '__main__':
     print("Starting Medical App...")
