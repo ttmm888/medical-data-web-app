@@ -15,6 +15,7 @@ import os
 import ssl
 import requests
 from dotenv import load_dotenv
+from sqlalchemy import text 
 
 load_dotenv()
 
@@ -1312,26 +1313,42 @@ def test_r2():
     
     return html_output
 
-@app.route('/test-long-diagnosis')
-def test_long_diagnosis():
-    """Test if long diagnosis works"""
+@app.route('/migrate-diagnosis')
+def migrate_diagnosis():
+    """Safely update diagnosis column length"""
     try:
-        # Find a test member or create one
-        member = Member.query.first()
-        if not member:
-            return "❌ No members found. Add a member first."
+        # For PostgreSQL (Railway)
+        if 'postgresql://' in app.config['SQLALCHEMY_DATABASE_URI']:
+            db.session.execute(text('''
+                ALTER TABLE diagnosis 
+                ALTER COLUMN name TYPE VARCHAR(1000)
+            '''))
+        # For SQLite (local development)
+        else:
+            # SQLite doesn't support ALTER COLUMN, so we need to recreate
+            db.session.execute(text('''
+                CREATE TABLE diagnosis_new (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(1000) NOT NULL,
+                    member_id INTEGER NOT NULL,
+                    FOREIGN KEY (member_id) REFERENCES member (id)
+                )
+            '''))
+            
+            db.session.execute(text('''
+                INSERT INTO diagnosis_new (id, name, member_id)
+                SELECT id, name, member_id FROM diagnosis
+            '''))
+            
+            db.session.execute(text('DROP TABLE diagnosis'))
+            db.session.execute(text('ALTER TABLE diagnosis_new RENAME TO diagnosis'))
         
-        # Try to add a long diagnosis
-        long_text = "A" * 500  # 500 character diagnosis
-        test_diagnosis = Diagnosis(name=long_text, member_id=member.id)
-        db.session.add(test_diagnosis)
         db.session.commit()
-        
-        return f"✅ Successfully added long diagnosis ({len(long_text)} characters)"
+        return "✅ Diagnosis column updated successfully! Now supports 1000 characters."
         
     except Exception as e:
         db.session.rollback()
-        return f"❌ Long diagnosis failed: {str(e)}"
+        return f"❌ Migration failed: {str(e)}"
 
 if __name__ == '__main__':
     print("Starting Medical App...")
