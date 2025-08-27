@@ -26,7 +26,7 @@ users_db = {}
 DATABASE_URL = os.getenv('DATABASE_URL')
 DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///medical.db'
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    # PostgreSQL-specific code here
+
     pass
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
@@ -116,6 +116,8 @@ class Diagnosis(db.Model):
     id=db.Column(db.Integer,primary_key=True)
     name=db.Column(db.String(1000),nullable=False)
     member_id=db.Column(db.Integer,db.ForeignKey('member.id'),nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
 class MedicalFile(db.Model):
     id=db.Column(db.Integer,primary_key=True)
@@ -826,7 +828,13 @@ def add_member():
 def view_member(member_id):
     member=Member.query.filter_by(member_id=member_id).first()
     if member:
-        return render_template('view-member.html',member=member)
+        sorted_diagnoses = sorted(member.diagnoses, 
+                                key=lambda d: d.created_at, 
+                                reverse=True)
+        
+        return render_template('view-member.html', 
+                             member=member, 
+                             sorted_diagnoses=sorted_diagnoses)
     else:
         flash('Member not found!', 'error')
         return redirect(url_for('home'))
@@ -950,7 +958,11 @@ def handle_diagnosis_actions(member,form,action):
         if diagnosis_name:
             existing=Diagnosis.query.filter_by(name=diagnosis_name,member_id=member.id).first()
             if not existing:
-                db.session.add(Diagnosis(name=diagnosis_name,member_id=member.id))
+                new_diagnosis = Diagnosis(
+                    name=diagnosis_name, 
+                    member_id=member.id,
+                    created_at=datetime.now())
+                db.session.add(new_diagnosis)
         else:
             flash("Diagnosis already exists!","warning")
     
@@ -1313,38 +1325,62 @@ def test_r2():
     
     return html_output
 
-@app.route('/migrate-diagnosis')
-def migrate_diagnosis():
-    """Safely update diagnosis column length"""
+@app.route('/migrate-diagnosis-timestamps')
+def migrate_diagnosis_timestamps():
+    """Add timestamps to existing diagnosis records"""
     try:
-        # For PostgreSQL (Railway)
-        if 'postgresql://' in app.config['SQLALCHEMY_DATABASE_URI']:
-            db.session.execute(text('''
-                ALTER TABLE diagnosis 
-                ALTER COLUMN name TYPE VARCHAR(1000)
-            '''))
-        # For SQLite (local development)
-        else:
-            # SQLite doesn't support ALTER COLUMN, so we need to recreate
-            db.session.execute(text('''
-                CREATE TABLE diagnosis_new (
-                    id INTEGER PRIMARY KEY,
-                    name VARCHAR(1000) NOT NULL,
-                    member_id INTEGER NOT NULL,
-                    FOREIGN KEY (member_id) REFERENCES member (id)
-                )
-            '''))
-            
-            db.session.execute(text('''
-                INSERT INTO diagnosis_new (id, name, member_id)
-                SELECT id, name, member_id FROM diagnosis
-            '''))
-            
-            db.session.execute(text('DROP TABLE diagnosis'))
-            db.session.execute(text('ALTER TABLE diagnosis_new RENAME TO diagnosis'))
+        # First, check if created_at column exists
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('diagnosis')]
+        
+        if 'created_at' not in columns:
+            # Add the columns to existing table
+            if 'postgresql://' in app.config['SQLALCHEMY_DATABASE_URI']:
+                # PostgreSQL
+                db.session.execute(text('''
+                    ALTER TABLE diagnosis 
+                    ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                '''))
+            else:
+                # SQLite - more complex migration needed
+                db.session.execute(text('''
+                    CREATE TABLE diagnosis_new (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR(1000) NOT NULL,
+                        member_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (member_id) REFERENCES member (id)
+                    )
+                '''))
+                
+                # Copy existing data with current timestamp
+                current_time = datetime.now()
+                db.session.execute(text('''
+                    INSERT INTO diagnosis_new (id, name, member_id, created_at, updated_at)
+                    SELECT id, name, member_id, :current_time, :current_time FROM diagnosis
+                '''), {'current_time': current_time})
+                
+                db.session.execute(text('DROP TABLE diagnosis'))
+                db.session.execute(text('ALTER TABLE diagnosis_new RENAME TO diagnosis'))
+        
+        # Update any NULL timestamps
+        db.session.execute(text('''
+            UPDATE diagnosis 
+            SET created_at = :current_time 
+            WHERE created_at IS NULL
+        '''), {'current_time': datetime.now()})
+        
+        db.session.execute(text('''
+            UPDATE diagnosis 
+            SET updated_at = :current_time 
+            WHERE updated_at IS NULL
+        '''), {'current_time': datetime.now()})
         
         db.session.commit()
-        return "✅ Diagnosis column updated successfully! Now supports 1000 characters."
+        return "✅ Diagnosis timestamps migration completed successfully!"
         
     except Exception as e:
         db.session.rollback()
