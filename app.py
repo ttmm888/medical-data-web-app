@@ -822,15 +822,24 @@ def add_member():
         </body>
         </html>
         '''
-
-
 @app.route('/view-member/<member_id>')
 def view_member(member_id):
-    member=Member.query.filter_by(member_id=member_id).first()
+    member = Member.query.filter_by(member_id=member_id).first()
     if member:
-        sorted_diagnoses = sorted(member.diagnoses, 
-                                key=lambda d: d.created_at, 
-                                reverse=True)
+        try:
+            # Try to get diagnoses with sorting
+            sorted_diagnoses = sorted(member.diagnoses, 
+                                    key=lambda d: d.created_at, 
+                                    reverse=True)
+        except Exception as e:
+            print(f"Error loading diagnoses: {e}")
+            # Fallback: get diagnoses without sorting by created_at
+            try:
+                # Just get the diagnoses without sorting by timestamp
+                sorted_diagnoses = list(member.diagnoses)
+            except:
+                # If even basic access fails, use empty list
+                sorted_diagnoses = []
         
         return render_template('view-member.html', 
                              member=member, 
@@ -1385,6 +1394,133 @@ def migrate_diagnosis_timestamps():
     except Exception as e:
         db.session.rollback()
         return f"❌ Migration failed: {str(e)}"
+    
+@app.route('/fix-database-schema')
+def fix_database_schema():
+    """Comprehensive database schema fix"""
+    try:
+        from sqlalchemy import inspect, text
+        from datetime import datetime
+        
+        inspector = inspect(db.engine)
+        diagnosis_columns = [col['name'] for col in inspector.get_columns('diagnosis')]
+        
+        results = []
+        
+        # Check if timestamps columns exist
+        if 'created_at' not in diagnosis_columns:
+            results.append("Adding created_at column...")
+            
+            if 'postgresql://' in app.config['SQLALCHEMY_DATABASE_URI']:
+                # PostgreSQL
+                db.session.execute(text('''
+                    ALTER TABLE diagnosis 
+                    ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                '''))
+                db.session.execute(text('''
+                    ALTER TABLE diagnosis 
+                    ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                '''))
+            else:
+                # SQLite
+                db.session.execute(text('''
+                    ALTER TABLE diagnosis 
+                    ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                '''))
+                db.session.execute(text('''
+                    ALTER TABLE diagnosis 
+                    ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  
+                '''))
+            
+            # Set existing records to current timestamp
+            current_time = datetime.now()
+            db.session.execute(text('''
+                UPDATE diagnosis 
+                SET created_at = :current_time, updated_at = :current_time
+                WHERE created_at IS NULL OR updated_at IS NULL
+            '''), {'current_time': current_time})
+            
+            results.append("Timestamp columns added successfully!")
+        else:
+            results.append("Timestamp columns already exist!")
+        
+        # Verify the fix
+        updated_columns = [col['name'] for col in inspector.get_columns('diagnosis')]
+        results.append(f"Current diagnosis table columns: {', '.join(updated_columns)}")
+        
+        # Test query
+        try:
+            test_diagnoses = Diagnosis.query.limit(1).all()
+            results.append("Test query successful!")
+        except Exception as e:
+            results.append(f"Test query failed: {e}")
+        
+        db.session.commit()
+        
+        return "<h1>Database Schema Fix Results</h1><ul>" + \
+               "".join(f"<li>{result}</li>" for result in results) + \
+               "</ul><p><a href='/'>Back to Home</a></p>"
+               
+    except Exception as e:
+        db.session.rollback()
+        return f"<h1>Schema Fix Failed</h1><p>Error: {str(e)}</p><p><a href='/'>Back to Home</a></p>"
+
+@app.route('/check-database-schema')
+def check_database_schema():
+    """Check current database schema"""
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        
+        html_output = "<h1>Database Schema Check</h1>"
+        
+        # Check all tables
+        tables = inspector.get_table_names()
+        html_output += f"<h2>Tables Found: {', '.join(tables)}</h2>"
+        
+        # Check diagnosis table specifically
+        if 'diagnosis' in tables:
+            diagnosis_columns = inspector.get_columns('diagnosis')
+            html_output += "<h3>Diagnosis Table Columns:</h3><ul>"
+            for col in diagnosis_columns:
+                html_output += f"<li><strong>{col['name']}</strong>: {col['type']}</li>"
+            html_output += "</ul>"
+            
+            # Check if problematic columns exist
+            column_names = [col['name'] for col in diagnosis_columns]
+            missing_columns = []
+            if 'created_at' not in column_names:
+                missing_columns.append('created_at')
+            if 'updated_at' not in column_names:
+                missing_columns.append('updated_at')
+                
+            if missing_columns:
+                html_output += f"<div style='background:#ffebee;padding:10px;margin:10px 0;border-left:4px solid #f44336'>"
+                html_output += f"<strong>Missing Columns:</strong> {', '.join(missing_columns)}<br>"
+                html_output += "<a href='/fix-database-schema'>Fix Schema</a>"
+                html_output += "</div>"
+            else:
+                html_output += "<div style='background:#e8f5e8;padding:10px;margin:10px 0;border-left:4px solid #4caf50'>"
+                html_output += "<strong>Schema looks good!</strong>"
+                html_output += "</div>"
+        
+        # Test a member view
+        try:
+            member = Member.query.first()
+            if member:
+                html_output += f"<h3>Test Member Found:</h3>"
+                html_output += f"<p>Testing diagnoses access for {member.name}...</p>"
+                diagnoses = member.diagnoses
+                html_output += f"<p>Success! Found {len(list(diagnoses))} diagnoses</p>"
+                html_output += f"<p><a href='/view-member/{member.member_id}'>Test View This Member</a></p>"
+        except Exception as e:
+            html_output += f"<p style='color:red'>Error accessing member diagnoses: {e}</p>"
+        
+        html_output += "<p><a href='/'>Back to Home</a></p>"
+        return html_output
+        
+    except Exception as e:
+        return f"<h1>Schema Check Failed</h1><p>Error: {str(e)}</p><p><a href='/'>Back to Home</a></p>"
 
 if __name__ == '__main__':
     print("Starting Medical App...")
