@@ -1522,6 +1522,275 @@ def check_database_schema():
     except Exception as e:
         return f"<h1>Schema Check Failed</h1><p>Error: {str(e)}</p><p><a href='/'>Back to Home</a></p>"
 
+# Add this route to your app.py to debug the exact issue
+
+@app.route('/debug-diagnosis')
+def debug_diagnosis():
+    """Debug the diagnosis table and relationships"""
+    try:
+        from sqlalchemy import inspect, text
+        
+        html_output = "<h1>Diagnosis Debug Report</h1>"
+        
+        # Check table structure
+        inspector = inspect(db.engine)
+        
+        if 'diagnosis' not in inspector.get_table_names():
+            return "<h1>Error: Diagnosis table doesn't exist!</h1><p><a href='/init-db'>Initialize Database</a></p>"
+        
+        # Get column info
+        columns = inspector.get_columns('diagnosis')
+        html_output += "<h2>Diagnosis Table Structure:</h2><ul>"
+        for col in columns:
+            html_output += f"<li><strong>{col['name']}</strong>: {col['type']} (nullable: {col.get('nullable', 'unknown')})</li>"
+        html_output += "</ul>"
+        
+        # Check if we have the problematic columns
+        column_names = [col['name'] for col in columns]
+        missing = []
+        if 'created_at' not in column_names:
+            missing.append('created_at')
+        if 'updated_at' not in column_names:
+            missing.append('updated_at')
+            
+        if missing:
+            html_output += f"<div style='background:#ffebee;padding:15px;margin:10px 0'><strong>Missing columns: {missing}</strong></div>"
+        
+        # Try raw SQL query
+        html_output += "<h2>Raw SQL Test:</h2>"
+        try:
+            result = db.session.execute(text("SELECT * FROM diagnosis LIMIT 3"))
+            rows = result.fetchall()
+            html_output += f"<p>Found {len(rows)} diagnosis records</p>"
+            if rows:
+                # Show column names from actual result
+                html_output += f"<p>Actual columns: {list(rows[0].keys()) if rows else 'No data'}</p>"
+        except Exception as sql_error:
+            html_output += f"<p style='color:red'>Raw SQL failed: {sql_error}</p>"
+        
+        # Try SQLAlchemy model query
+        html_output += "<h2>SQLAlchemy Model Test:</h2>"
+        try:
+            diagnosis_count = Diagnosis.query.count()
+            html_output += f"<p>Diagnosis.query.count(): {diagnosis_count}</p>"
+            
+            if diagnosis_count > 0:
+                # Try to get one diagnosis
+                first_diagnosis = Diagnosis.query.first()
+                html_output += f"<p>First diagnosis: {first_diagnosis.name}</p>"
+                
+                # Check if it has timestamp attributes
+                if hasattr(first_diagnosis, 'created_at'):
+                    html_output += f"<p>created_at: {first_diagnosis.created_at}</p>"
+                else:
+                    html_output += "<p style='color:red'>created_at attribute missing from model</p>"
+                    
+        except Exception as model_error:
+            html_output += f"<p style='color:red'>SQLAlchemy model failed: {model_error}</p>"
+        
+        # Test member-diagnosis relationship
+        html_output += "<h2>Member-Diagnosis Relationship Test:</h2>"
+        try:
+            member = Member.query.first()
+            if member:
+                html_output += f"<p>Testing member: {member.name}</p>"
+                try:
+                    diagnosis_list = list(member.diagnoses)
+                    html_output += f"<p>Member has {len(diagnosis_list)} diagnoses</p>"
+                    
+                    if diagnosis_list:
+                        first_diag = diagnosis_list[0]
+                        html_output += f"<p>First diagnosis: {first_diag.name}</p>"
+                        if hasattr(first_diag, 'created_at') and first_diag.created_at:
+                            html_output += f"<p>Timestamp: {first_diag.created_at}</p>"
+                        else:
+                            html_output += "<p style='color:orange'>Diagnosis has no created_at timestamp</p>"
+                            
+                except Exception as rel_error:
+                    html_output += f"<p style='color:red'>Relationship access failed: {rel_error}</p>"
+            else:
+                html_output += "<p>No members found to test</p>"
+        except Exception as member_error:
+            html_output += f"<p style='color:red'>Member query failed: {member_error}</p>"
+        
+        html_output += "<hr><p><a href='/force-fix-diagnosis'>Force Fix Diagnosis Table</a> | <a href='/'>Back to Home</a></p>"
+        return html_output
+        
+    except Exception as e:
+        import traceback
+        return f"<h1>Debug Failed</h1><pre>{traceback.format_exc()}</pre>"
+    
+# Add this route to your app.py for a comprehensive fix
+
+@app.route('/force-fix-diagnosis')
+def force_fix_diagnosis():
+    """Comprehensive fix for diagnosis table issues"""
+    try:
+        from sqlalchemy import inspect, text
+        from datetime import datetime
+        
+        results = []
+        
+        # Step 1: Check current state
+        inspector = inspect(db.engine)
+        tables = inspector.get_table_names()
+        
+        if 'diagnosis' not in tables:
+            results.append("Diagnosis table doesn't exist - creating from scratch")
+            db.create_all()
+            return "<h1>Created diagnosis table</h1><p><a href='/'>Test Now</a></p>"
+        
+        # Step 2: Get current columns
+        current_columns = [col['name'] for col in inspector.get_columns('diagnosis')]
+        results.append(f"Current columns: {current_columns}")
+        
+        # Step 3: Handle missing timestamp columns
+        needs_created_at = 'created_at' not in current_columns
+        needs_updated_at = 'updated_at' not in current_columns
+        
+        if needs_created_at or needs_updated_at:
+            results.append("Adding missing timestamp columns...")
+            
+            # Detect database type
+            database_url = app.config['SQLALCHEMY_DATABASE_URI']
+            is_postgresql = 'postgresql://' in database_url
+            
+            try:
+                if needs_created_at:
+                    if is_postgresql:
+                        db.session.execute(text('''
+                            ALTER TABLE diagnosis 
+                            ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        '''))
+                    else:
+                        # SQLite
+                        db.session.execute(text('''
+                            ALTER TABLE diagnosis 
+                            ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        '''))
+                    results.append("Added created_at column")
+                
+                if needs_updated_at:
+                    if is_postgresql:
+                        db.session.execute(text('''
+                            ALTER TABLE diagnosis 
+                            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        '''))
+                    else:
+                        # SQLite  
+                        db.session.execute(text('''
+                            ALTER TABLE diagnosis 
+                            ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        '''))
+                    results.append("Added updated_at column")
+                    
+            except Exception as alter_error:
+                results.append(f"Direct ALTER failed: {alter_error}")
+                results.append("Trying alternative approach...")
+                
+                # Alternative: Recreate table (more reliable)
+                current_time = datetime.now().isoformat()
+                
+                # Create new table with correct structure
+                db.session.execute(text('''
+                    CREATE TABLE diagnosis_new (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR(1000) NOT NULL,
+                        member_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                '''))
+                
+                # Copy existing data with timestamps
+                db.session.execute(text(f'''
+                    INSERT INTO diagnosis_new (id, name, member_id, created_at, updated_at)
+                    SELECT id, name, member_id, '{current_time}', '{current_time}'
+                    FROM diagnosis
+                '''))
+                
+                # Replace old table
+                db.session.execute(text('DROP TABLE diagnosis'))
+                db.session.execute(text('ALTER TABLE diagnosis_new RENAME TO diagnosis'))
+                results.append("Recreated table with proper structure")
+        
+        # Step 4: Update any NULL timestamps
+        current_time = datetime.now()
+        update_result = db.session.execute(text('''
+            UPDATE diagnosis 
+            SET created_at = :current_time 
+            WHERE created_at IS NULL
+        '''), {'current_time': current_time})
+        
+        if update_result.rowcount > 0:
+            results.append(f"Updated {update_result.rowcount} records with missing created_at")
+            
+        update_result2 = db.session.execute(text('''
+            UPDATE diagnosis 
+            SET updated_at = :current_time 
+            WHERE updated_at IS NULL
+        '''), {'current_time': current_time})
+        
+        if update_result2.rowcount > 0:
+            results.append(f"Updated {update_result2.rowcount} records with missing updated_at")
+        
+        # Step 5: Commit changes
+        db.session.commit()
+        results.append("All changes committed successfully")
+        
+        # Step 6: Verify the fix
+        try:
+            test_diagnosis = Diagnosis.query.first()
+            if test_diagnosis and hasattr(test_diagnosis, 'created_at'):
+                results.append("Verification successful - model can access timestamps")
+            else:
+                results.append("Warning: Model still can't access timestamps properly")
+        except Exception as verify_error:
+            results.append(f"Verification failed: {verify_error}")
+        
+        # Step 7: Test member relationship
+        try:
+            member = Member.query.first()
+            if member:
+                diagnoses = list(member.diagnoses)
+                results.append(f"Member relationship test: Found {len(diagnoses)} diagnoses")
+                
+                if diagnoses:
+                    # Try sorting to test the original issue
+                    sorted_diagnoses = sorted(diagnoses, key=lambda d: d.created_at or datetime.min, reverse=True)
+                    results.append("Sorting test successful!")
+        except Exception as rel_error:
+            results.append(f"Relationship test failed: {rel_error}")
+        
+        # Generate response
+        html_output = "<h1>Force Fix Diagnosis - Results</h1><ul>"
+        for result in results:
+            html_output += f"<li>{result}</li>"
+        html_output += "</ul>"
+        
+        # Add test links
+        html_output += "<hr><h2>Test the Fix</h2><ul>"
+        html_output += "<li><a href='/debug-diagnosis'>Run Diagnosis Debug Again</a></li>"
+        
+        # Find a member to test
+        try:
+            test_member = Member.query.first()
+            if test_member:
+                html_output += f"<li><a href='/view-member/{test_member.member_id}'>Test View Member: {test_member.name}</a></li>"
+        except:
+            pass
+            
+        html_output += "<li><a href='/'>Back to Home</a></li>"
+        html_output += "</ul>"
+        
+        return html_output
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return f"<h1>Force Fix Failed</h1><pre>{traceback.format_exc()}</pre><p><a href='/'>Back to Home</a></p>"
+
+
 if __name__ == '__main__':
     print("Starting Medical App...")
     create_tables()
