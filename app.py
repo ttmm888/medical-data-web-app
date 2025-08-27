@@ -51,6 +51,26 @@ except Exception as e:
     app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+@app.template_global()
+def now():
+    """Make current datetime available in templates"""
+    return datetime
+
+@app.template_global() 
+def moment():
+    """Make datetime available as 'moment' in templates for compatibility"""
+    return datetime
+
+# Alternative: Add template context processor
+@app.context_processor
+def inject_template_vars():
+    """Inject common variables into all templates"""
+    return {
+        'now': datetime,
+        'moment': datetime,  # For compatibility with your existing template
+        'datetime': datetime
+    }
+
 # Initialize extensions
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
