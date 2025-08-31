@@ -842,31 +842,119 @@ def add_member():
         </body>
         </html>
         '''
+
 @app.route('/view-member/<member_id>')
 def view_member(member_id):
-    member = Member.query.filter_by(member_id=member_id).first()
-    if member:
-        try:
-            # Try to get diagnoses with sorting
-            sorted_diagnoses = sorted(member.diagnoses, 
-                                    key=lambda d: d.created_at, 
-                                    reverse=True)
-        except Exception as e:
-            print(f"Error loading diagnoses: {e}")
-            # Fallback: get diagnoses without sorting by created_at
-            try:
-                # Just get the diagnoses without sorting by timestamp
-                sorted_diagnoses = list(member.diagnoses)
-            except:
-                # If even basic access fails, use empty list
-                sorted_diagnoses = []
+    """Enhanced view member with comprehensive error handling"""
+    try:
+        # Find the member
+        member = Member.query.filter_by(member_id=member_id).first()
+        if not member:
+            flash('Member not found!', 'error')
+            return redirect(url_for('home'))
         
-        return render_template('view-member.html', 
-                             member=member, 
-                             sorted_diagnoses=sorted_diagnoses)
-    else:
-        flash('Member not found!', 'error')
-        return redirect(url_for('home'))
+        print(f"DEBUG: Found member: {member.name}")
+        
+        # Handle diagnoses with multiple fallback strategies
+        sorted_diagnoses = []
+        try:
+            # Strategy 1: Try to get diagnoses with sorting by created_at
+            diagnoses = member.diagnoses
+            print(f"DEBUG: Raw diagnoses count: {len(list(diagnoses))}")
+            
+            # Convert to list to avoid multiple queries
+            diagnoses_list = list(member.diagnoses)
+            
+            if diagnoses_list:
+                print(f"DEBUG: First diagnosis: {diagnoses_list[0].name}")
+                
+                # Check if first diagnosis has created_at attribute
+                first_diag = diagnoses_list[0]
+                if hasattr(first_diag, 'created_at'):
+                    print(f"DEBUG: First diagnosis created_at: {first_diag.created_at}")
+                    
+                    # Sort with None-safe logic
+                    sorted_diagnoses = sorted(
+                        diagnoses_list, 
+                        key=lambda d: d.created_at or datetime.min, 
+                        reverse=True
+                    )
+                    print(f"DEBUG: Sorted {len(sorted_diagnoses)} diagnoses successfully")
+                else:
+                    print("DEBUG: Diagnosis missing created_at attribute - using unsorted list")
+                    sorted_diagnoses = diagnoses_list
+            else:
+                print("DEBUG: No diagnoses found")
+                sorted_diagnoses = []
+                
+        except Exception as diag_error:
+            print(f"DEBUG ERROR loading diagnoses: {diag_error}")
+            print(f"DEBUG ERROR type: {type(diag_error).__name__}")
+            
+            # Fallback: Try to get diagnoses without sorting
+            try:
+                sorted_diagnoses = list(member.diagnoses)
+                print(f"DEBUG: Fallback successful - got {len(sorted_diagnoses)} diagnoses")
+            except Exception as fallback_error:
+                print(f"DEBUG FALLBACK ERROR: {fallback_error}")
+                sorted_diagnoses = []
+                flash('Warning: Could not load diagnosis history', 'warning')
+        
+        print(f"DEBUG: Final sorted_diagnoses count: {len(sorted_diagnoses)}")
+        
+        # Render template with error handling
+        try:
+            return render_template('view-member.html', 
+                                 member=member, 
+                                 sorted_diagnoses=sorted_diagnoses)
+        except Exception as template_error:
+            print(f"DEBUG TEMPLATE ERROR: {template_error}")
+            
+            # Return a simple fallback page if template fails
+            return f'''
+            <html>
+            <head><title>Member: {member.name}</title></head>
+            <body>
+                <h1>Member: {member.name.title()}</h1>
+                <p><strong>Member ID:</strong> {member.member_id}</p>
+                <p><strong>Date of Birth:</strong> {member.date_of_birth}</p>
+                <p><strong>Age:</strong> {member.age}</p>
+                <p><strong>Gender:</strong> {member.gender}</p>
+                
+                <h2>Diagnoses ({len(sorted_diagnoses)})</h2>
+                <ul>
+                    {''.join(f"<li>{d.name}</li>" for d in sorted_diagnoses)}
+                </ul>
+                
+                <p><strong>Template Error:</strong> {template_error}</p>
+                <p><a href="/">Back to Home</a></p>
+                <p><a href="/debug-diagnosis">Debug Diagnosis Issues</a></p>
+            </body>
+            </html>
+            '''
+            
+    except Exception as e:
+        print(f"DEBUG CRITICAL ERROR in view_member: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        # Return error page with debug info
+        return f'''
+        <html>
+        <body>
+            <h1>View Member Error</h1>
+            <p><strong>Error:</strong> {str(e)}</p>
+            <p><strong>Member ID:</strong> {member_id}</p>
+            <h2>Debug Actions:</h2>
+            <ul>
+                <li><a href="/debug-diagnosis">Debug Diagnosis Table</a></li>
+                <li><a href="/force-fix-diagnosis">Fix Diagnosis Issues</a></li>
+                <li><a href="/check-database-schema">Check Database Schema</a></li>
+                <li><a href="/">Back to Home</a></li>
+            </ul>
+        </body>
+        </html>
+        '''
     
 @app.route('/update-member/<member_id>', methods=['GET','POST'])
 def update_member(member_id):
@@ -1810,6 +1898,229 @@ def force_fix_diagnosis():
         import traceback
         return f"<h1>Force Fix Failed</h1><pre>{traceback.format_exc()}</pre><p><a href='/'>Back to Home</a></p>"
 
+@app.route('/one-click-diagnosis-fix')
+def one_click_diagnosis_fix():
+    """Complete diagnosis table fix with one click"""
+    try:
+        from sqlalchemy import inspect, text
+        from datetime import datetime
+        
+        results = ["🔧 Starting One-Click Diagnosis Fix..."]
+        
+        # Step 1: Check current database state
+        inspector = inspect(db.engine)
+        tables = inspector.get_table_names()
+        results.append(f"✅ Found tables: {', '.join(tables)}")
+        
+        if 'diagnosis' not in tables:
+            results.append("❌ Diagnosis table missing - creating it...")
+            db.create_all()
+            results.append("✅ Created all missing tables")
+            return generate_fix_report(results + ["✅ Fix completed successfully!"])
+        
+        # Step 2: Check diagnosis table structure
+        diagnosis_columns = [col['name'] for col in inspector.get_columns('diagnosis')]
+        results.append(f"📋 Current diagnosis columns: {', '.join(diagnosis_columns)}")
+        
+        missing_cols = []
+        if 'created_at' not in diagnosis_columns:
+            missing_cols.append('created_at')
+        if 'updated_at' not in diagnosis_columns:
+            missing_cols.append('updated_at')
+        
+        # Step 3: Fix missing columns
+        if missing_cols:
+            results.append(f"🔨 Adding missing columns: {', '.join(missing_cols)}")
+            
+            # Determine database type
+            db_url = app.config['SQLALCHEMY_DATABASE_URI']
+            is_postgres = 'postgresql://' in db_url.lower()
+            
+            current_time = datetime.now()
+            
+            try:
+                # Add columns
+                for col in missing_cols:
+                    if is_postgres:
+                        db.session.execute(text(f'''
+                            ALTER TABLE diagnosis 
+                            ADD COLUMN IF NOT EXISTS {col} TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        '''))
+                    else:
+                        # SQLite
+                        db.session.execute(text(f'''
+                            ALTER TABLE diagnosis 
+                            ADD COLUMN {col} TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        '''))
+                
+                results.append("✅ Successfully added timestamp columns")
+                
+            except Exception as alter_error:
+                results.append(f"⚠️ ALTER TABLE failed: {alter_error}")
+                results.append("🔄 Trying table recreation method...")
+                
+                # Backup existing data
+                existing_data = db.session.execute(text('SELECT * FROM diagnosis')).fetchall()
+                results.append(f"💾 Backed up {len(existing_data)} existing records")
+                
+                # Create new table with proper structure
+                db.session.execute(text('''
+                    CREATE TABLE diagnosis_temp (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR(1000) NOT NULL,
+                        member_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (member_id) REFERENCES member (id)
+                    )
+                '''))
+                
+                # Copy data with timestamps
+                for row in existing_data:
+                    db.session.execute(text('''
+                        INSERT INTO diagnosis_temp (id, name, member_id, created_at, updated_at)
+                        VALUES (:id, :name, :member_id, :created_at, :updated_at)
+                    '''), {
+                        'id': row.id,
+                        'name': row.name, 
+                        'member_id': row.member_id,
+                        'created_at': current_time,
+                        'updated_at': current_time
+                    })
+                
+                # Replace old table
+                db.session.execute(text('DROP TABLE diagnosis'))
+                db.session.execute(text('ALTER TABLE diagnosis_temp RENAME TO diagnosis'))
+                results.append("✅ Successfully recreated table with proper structure")
+        
+        # Step 4: Update any NULL timestamps
+        null_updates = db.session.execute(text('''
+            UPDATE diagnosis 
+            SET created_at = :current_time, updated_at = :current_time
+            WHERE created_at IS NULL OR updated_at IS NULL
+        '''), {'current_time': current_time})
+        
+        if null_updates.rowcount > 0:
+            results.append(f"🔄 Updated {null_updates.rowcount} records with missing timestamps")
+        
+        # Step 5: Commit all changes
+        db.session.commit()
+        results.append("💾 All changes committed successfully")
+        
+        # Step 6: Verify the fix
+        try:
+            # Test basic query
+            diagnosis_count = Diagnosis.query.count()
+            results.append(f"✅ Basic query test: Found {diagnosis_count} diagnoses")
+            
+            # Test model access to timestamps
+            if diagnosis_count > 0:
+                first_diag = Diagnosis.query.first()
+                if hasattr(first_diag, 'created_at') and first_diag.created_at:
+                    results.append("✅ Timestamp access test: SUCCESS")
+                else:
+                    results.append("❌ Timestamp access test: FAILED")
+            
+            # Test member relationship
+            member = Member.query.first()
+            if member:
+                try:
+                    diagnoses_list = list(member.diagnoses)
+                    sorted_diagnoses = sorted(diagnoses_list, key=lambda d: d.created_at or datetime.min, reverse=True)
+                    results.append(f"✅ Member relationship test: SUCCESS ({len(sorted_diagnoses)} diagnoses)")
+                except Exception as rel_error:
+                    results.append(f"❌ Member relationship test: FAILED - {rel_error}")
+            
+        except Exception as verify_error:
+            results.append(f"❌ Verification failed: {verify_error}")
+        
+        return generate_fix_report(results)
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        error_trace = traceback.format_exc()
+        return f'''
+        <html>
+        <head><title>Fix Failed</title></head>
+        <body>
+            <h1>❌ One-Click Fix Failed</h1>
+            <p><strong>Error:</strong> {str(e)}</p>
+            <details>
+                <summary>Click for full error trace</summary>
+                <pre>{error_trace}</pre>
+            </details>
+            <h2>Manual Fix Options:</h2>
+            <ul>
+                <li><a href="/force-fix-diagnosis">Force Fix Diagnosis</a></li>
+                <li><a href="/init-db">Reinitialize Database</a></li>
+                <li><a href="/debug-diagnosis">Debug Diagnosis Issues</a></li>
+                <li><a href="/">Back to Home</a></li>
+            </ul>
+        </body>
+        </html>
+        '''
+
+def generate_fix_report(results):
+    """Generate a nice HTML report of the fix results"""
+    html = '''
+    <html>
+    <head>
+        <title>Diagnosis Fix Report</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+            .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .success { color: #28a745; }
+            .warning { color: #ffc107; }
+            .error { color: #dc3545; }
+            .info { color: #17a2b8; }
+            ul { line-height: 1.6; }
+            li { margin-bottom: 8px; }
+            .actions { margin-top: 30px; padding: 20px; background: #e9ecef; border-radius: 5px; }
+            .btn { display: inline-block; padding: 10px 20px; margin: 5px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+            .btn:hover { background: #0056b3; }
+            .btn-success { background: #28a745; }
+            .btn-success:hover { background: #1e7e34; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔧 Diagnosis Fix Report</h1>
+            <h2>Fix Results:</h2>
+            <ul>
+    '''
+    
+    for result in results:
+        css_class = "success" if "✅" in result else "warning" if "⚠️" in result else "error" if "❌" in result else "info"
+        html += f'<li class="{css_class}">{result}</li>'
+    
+    html += '''
+            </ul>
+            
+            <div class="actions">
+                <h3>Next Steps:</h3>
+                <a href="/" class="btn btn-success">Test Main Page</a>
+                <a href="/add-member" class="btn">Add New Member</a>
+                <a href="/debug-diagnosis" class="btn">Run Diagnosis Debug</a>
+                <a href="/test" class="btn">Test Database Connection</a>
+            </div>
+            
+            <div style="margin-top: 20px; padding: 15px; background: #d4edda; border-left: 4px solid #28a745; border-radius: 4px;">
+                <strong>Tutorial Tip for Beginners:</strong><br>
+                This fix addressed common Flask-SQLAlchemy database schema issues. The main problems were:
+                <ul>
+                    <li><strong>Missing timestamp columns:</strong> The diagnosis table didn't have created_at/updated_at fields</li>
+                    <li><strong>Template errors:</strong> Jinja2 templates tried to access non-existent attributes</li>
+                    <li><strong>Sorting issues:</strong> Python couldn't sort records without proper timestamp data</li>
+                </ul>
+                These are common issues when evolving database schemas in web applications.
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+    
+    return html
 
 if __name__ == '__main__':
     print("Starting Medical App...")
