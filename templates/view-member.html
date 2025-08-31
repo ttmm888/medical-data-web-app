@@ -206,27 +206,28 @@
                                         <span class="diagnosis-name">{{ diagnosis.name }}</span>
                                     </div>
                                     
-                                    <!-- Time since diagnosis (optional feature) -->
-                                    <div class="time-indicator mt-2">
-                                        <small class="text-muted">
-                                            <i class="bi bi-clock me-1"></i>
-                                            {% set days_since = (moment().date() - diagnosis.created_at.date()).days if moment else 0 %}
-                                            {% if (moment().date() - diagnosis.created_at.date()).days == 0 %}
-                                                Added today
-                                            {% elif (moment().date() - diagnosis.created_at.date()).days == 1 %}
-                                                Added yesterday
-                                            {% elif (moment().date() - diagnosis.created_at.date()).days < 7 %}
-                                                Added {{ (moment().date() - diagnosis.created_at.date()).days }} days ago
-                                            {% elif (moment().date() - diagnosis.created_at.date()).days < 30 %}
-                                                Added {{ ((moment().date() - diagnosis.created_at.date()).days / 7)|round|int }} weeks ago
-                                            {% else %}
-                                                Added {{ diagnosis.created_at.strftime('%B %Y') }}
-                                            {% endif %}
-                                        </small>
-                                    </div>
-                                </div>
-                            {% endfor %}
-                        </div>
+                                    <!-- Time since diagnosis (fixed version) -->
+<div class="time-indicator mt-2">
+    <small class="text-muted">
+        <i class="bi bi-clock me-1"></i>
+        {% if diagnosis.created_at %}
+            {% set days_ago = (moment().date() - diagnosis.created_at.date()).days if moment is defined else ((now().date() - diagnosis.created_at.date()).days if now is defined else 0) %}
+            {% if days_ago == 0 %}
+                Added today
+            {% elif days_ago == 1 %}
+                Added yesterday
+            {% elif days_ago < 7 %}
+                Added {{ days_ago }} days ago
+            {% elif days_ago < 30 %}
+                Added {{ (days_ago / 7)|round|int }} weeks ago
+            {% else %}
+                Added {{ diagnosis.created_at.strftime('%B %Y') }}
+            {% endif %}
+        {% else %}
+            Added (date unknown)
+        {% endif %}
+    </small>
+</div>
                         
                         <!-- Summary information -->
                         <div class="diagnoses-summary mt-3 p-2 bg-info bg-opacity-10 rounded">
