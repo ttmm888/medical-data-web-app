@@ -185,8 +185,7 @@
                     {% if sorted_diagnoses %}
                         <div class="diagnoses-timeline">
                             {% for diagnosis in sorted_diagnoses %}
-                                <div class="diagnosis-item p-3 mb-3 bg-light rounded position-relative" 
-                                     data-date="{% if diagnosis.created_at %}{{ diagnosis.created_at.strftime('%Y-%m-%d') }}{% else %}unknown{% endif %}">
+                                <div class="diagnosis-item p-3 mb-3 bg-light rounded position-relative">
                                     <!-- Date badge - positioned at top right -->
                                     <div class="date-badge">
                                         <span class="badge bg-info">
@@ -210,30 +209,12 @@
                                         <span class="diagnosis-name">{{ diagnosis.name }}</span>
                                     </div>
                                     
-                                    <!-- FIXED: Time since diagnosis -->
+                                    <!-- SAFE: Use pre-calculated time difference from Python -->
                                     <div class="time-indicator mt-2">
                                         <small class="text-muted">
                                             <i class="bi bi-clock me-1"></i>
-                                            {% if diagnosis.created_at %}
-                                                {% set diagnosis_date = diagnosis.created_at.date() %}
-                                                {% set current_date = now().date() %}
-                                                {% set days_diff = (current_date - diagnosis_date).days %}
-                                                
-                                                {% if days_diff == 0 %}
-                                                    Added today
-                                                {% elif days_diff == 1 %}
-                                                    Added yesterday  
-                                                {% elif days_diff < 7 %}
-                                                    Added {{ days_diff }} days ago
-                                                {% elif days_diff < 30 %}
-                                                    {% set weeks = (days_diff / 7)|round|int %}
-                                                    Added {{ weeks }} week{% if weeks > 1 %}s{% endif %} ago
-                                                {% elif days_diff < 365 %}
-                                                    {% set months = (days_diff / 30)|round|int %}
-                                                    Added {{ months }} month{% if months > 1 %}s{% endif %} ago
-                                                {% else %}
-                                                    Added {{ diagnosis.created_at.strftime('%B %Y') }}
-                                                {% endif %}
+                                            {% if diagnosis.time_ago %}
+                                                {{ diagnosis.time_ago }}
                                             {% else %}
                                                 Added (date unknown)
                                             {% endif %}

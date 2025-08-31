@@ -56,12 +56,6 @@ def now():
     """Make current datetime available in templates"""
     return datetime
 
-@app.template_global() 
-def moment():
-    """Make datetime available as 'moment' in templates for compatibility"""
-    return datetime
-
-# Alternative: Add template context processor
 @app.context_processor
 def inject_template_vars():
     """Inject common variables into all templates"""
@@ -2121,6 +2115,29 @@ def generate_fix_report(results):
     '''
     
     return html
+
+@app.route('/debug-datetime')
+def debug_datetime():
+    """Debug datetime template functions"""
+    try:
+        return render_template_string('''
+        <h1>DateTime Debug Test</h1>
+        <p><strong>Testing now():</strong> {{ now() }}</p>
+        <p><strong>Testing today():</strong> {{ today() }}</p>
+        <p><strong>Testing datetime.now():</strong> {{ datetime.now() }}</p>
+        <p><strong>Testing current date:</strong> {{ now().date() }}</p>
+        <p><strong>Testing strftime:</strong> {{ now().strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        
+        <h2>Manual Date Calculation Test</h2>
+        {% set test_date = datetime(2024, 1, 1) %}
+        {% set current = now() %}
+        {% set days_diff = (current.date() - test_date.date()).days %}
+        <p><strong>Days since Jan 1, 2024:</strong> {{ days_diff }}</p>
+        
+        <p><a href="/">Back to Home</a></p>
+        ''')
+    except Exception as e:
+        return f"Debug failed: {str(e)}"
 
 if __name__ == '__main__':
     print("Starting Medical App...")
