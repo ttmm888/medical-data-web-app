@@ -210,33 +210,27 @@
                                         <span class="diagnosis-name">{{ diagnosis.name }}</span>
                                     </div>
                                     
-                                    <!-- Time since diagnosis (FIXED version) -->
+                                    <!-- FIXED: Time since diagnosis -->
                                     <div class="time-indicator mt-2">
                                         <small class="text-muted">
                                             <i class="bi bi-clock me-1"></i>
                                             {% if diagnosis.created_at %}
-                                                {% set today = moment() %}
-                                                {% if today %}
-                                                    {% set days_ago = (today.date() - diagnosis.created_at.date()).days %}
-                                                {% else %}
-                                                    {# Fallback calculation without moment #}
-                                                    {% set import_datetime = namespace() %}
-                                                    {% set import_datetime.now = moment() if moment is defined else none %}
-                                                    {% if import_datetime.now %}
-                                                        {% set days_ago = (import_datetime.now.date() - diagnosis.created_at.date()).days %}
-                                                    {% else %}
-                                                        {% set days_ago = 0 %}
-                                                    {% endif %}
-                                                {% endif %}
+                                                {% set diagnosis_date = diagnosis.created_at.date() %}
+                                                {% set current_date = now().date() %}
+                                                {% set days_diff = (current_date - diagnosis_date).days %}
                                                 
-                                                {% if days_ago == 0 %}
+                                                {% if days_diff == 0 %}
                                                     Added today
-                                                {% elif days_ago == 1 %}
-                                                    Added yesterday
-                                                {% elif days_ago < 7 %}
-                                                    Added {{ days_ago }} days ago
-                                                {% elif days_ago < 30 %}
-                                                    Added {{ (days_ago / 7)|round|int }} weeks ago
+                                                {% elif days_diff == 1 %}
+                                                    Added yesterday  
+                                                {% elif days_diff < 7 %}
+                                                    Added {{ days_diff }} days ago
+                                                {% elif days_diff < 30 %}
+                                                    {% set weeks = (days_diff / 7)|round|int %}
+                                                    Added {{ weeks }} week{% if weeks > 1 %}s{% endif %} ago
+                                                {% elif days_diff < 365 %}
+                                                    {% set months = (days_diff / 30)|round|int %}
+                                                    Added {{ months }} month{% if months > 1 %}s{% endif %} ago
                                                 {% else %}
                                                     Added {{ diagnosis.created_at.strftime('%B %Y') }}
                                                 {% endif %}
@@ -393,7 +387,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
-<!-- Enhanced CSS styles remain the same -->
+<!-- Enhanced CSS styles -->
 <style>
 /* Enhanced styling for the diagnoses toggle button */
 #diagnosesToggle {
@@ -469,6 +463,12 @@ document.addEventListener('DOMContentLoaded', function() {
     word-wrap: break-word;
 }
 
+.date-badge {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+}
+
 /* Responsive design for mobile devices */
 @media (max-width: 768px) {
     #diagnosesToggle {
@@ -499,6 +499,11 @@ document.addEventListener('DOMContentLoaded', function() {
     .row.mb-3 .col-12.col-sm-4,
     .row .col-12.col-sm-4 {
         margin-bottom: 0.25rem;
+    }
+    
+    .date-badge {
+        position: static;
+        margin-bottom: 10px;
     }
 }
 
